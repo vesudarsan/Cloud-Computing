@@ -1,0 +1,9 @@
+{
+  "mqtt_broker": "broker.hivemq.com",
+  "mqtt_port": 1883,  
+  "drone_UID" : "123456789",
+  "sparkplug_namespace": "spBv1.0",
+  "sparkplug_group_id": "DumsDroneFleet",
+  "sparkplug_device_id": "scadaCloud",  
+  "log_level": "DEBUG" 
+}

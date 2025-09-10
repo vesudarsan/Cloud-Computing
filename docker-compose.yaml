@@ -1,0 +1,19 @@
+version: "3.8"
+# services:
+#   rabbitmq:
+#     image: rabbitmq:3.11-management
+#     hostname: rabbit
+#     environment:
+#       RABBITMQ_DEFAULT_USER: user
+#       RABBITMQ_DEFAULT_PASS: password
+#       # Enable MQTT plugin at startup
+#       RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbitmq_plugins_enable mqtt,rabbitmq_management"
+#     ports:
+#       - "5672:5672"     # AMQP
+#       - "15672:15672"   # Management UI
+#       - "1883:1883"     # MQTT plain
+#       - "8883:8883"     # MQTT over TLS (if you enable it)
+#     volumes:
+#       - rabbitmq-data:/var/lib/rabbitmq
+# volumes:
+#   rabbitmq-data:
