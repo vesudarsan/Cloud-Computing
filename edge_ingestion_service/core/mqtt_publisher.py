@@ -91,7 +91,7 @@ class MQTTPublisher:
     
     def is_mqtt_connected(self):
         return self.mqtt_connected
-
+    
     def run_loop(self):
         logging.info("Started run_loop() thread for store and forward messages.")
         while self.running:

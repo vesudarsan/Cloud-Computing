@@ -12,10 +12,14 @@ logging = setup_logger(__name__)
 
 
 # InfluxDB Config
-INFLUX_URL = "http://localhost:8086"
 INFLUX_TOKEN = "drone-secret-token"
 INFLUX_ORG = "drone-org"
 INFLUX_BUCKET = "drone_telemetry"
+
+if platform.system() == "Windows": # 2dl read from config
+    INFLUX_URL = "http://localhost:8086"
+else:
+    INFLUX_URL = "http://host.docker.internal:8086"
 
 class MQTTClient:
     def __init__(self, broker, port, drone_id,sparkplug_namespace,
@@ -30,6 +34,7 @@ class MQTTClient:
         self.sp_group_id = sp_group_id
         self.sp_edge_id = sp_edge_id
         self.sp_device_id = sp_device_id
+        self.drone_location = {'lat': 0.0, 'lon': 0.0}
         # self.TOPIC_PREFIX = f"{sparkplug_namespace}/{sp_group_id}/+/{sp_edge_id}"
         self.TOPIC_PREFIX = f"{sparkplug_namespace}/{sp_group_id}/NCMD/{sp_edge_id}"
         self.rest_client = RestClient()
@@ -126,20 +131,35 @@ class MQTTClient:
         self.client.client.subscribe(topic)
         self.client.client.on_message = self._on_message
 
+    def update_drone_location(self,droneId,payload):
+
+        self.drone_location['droneId'] = droneId
+        self.drone_location['lat'] = payload['lat']
+        self.drone_location['lon'] = payload['lon']
+        self.drone_location['alt'] = payload['alt']
+        self.drone_location['heading'] = payload['hdg']
+
+    def get_drone_location(self):
+        return self.drone_location
+
+
     def _on_message(self, client, userdata, msg):
                
         try:
             #payload_str = msg.payload.decode("utf-8")
-            logging.debug(f"📩 Received message on {msg.topic}: {msg.payload.decode("utf-8")}")
+            logging.debug(f"📩 Received message on {msg.topic}: {msg.payload.decode('utf-8')}")
        
             topic = msg.topic
             droneId = topic.split("/")[-2]
        
-         
+            message_type = None
             if topic.endswith("/Mavlink"):
-                payload = json.loads(msg.payload.decode())
-                message_type = payload.get("messageType")
+                payload = json.loads(msg.payload.decode())                
+                message_type = payload.get("messageType")                
                 self.influx_writer.write_points(payload,droneId,message_type)
+            
+            if message_type == "GLOBAL_POSITION_INT":
+                self.update_drone_location(droneId,payload)
               
 
            
@@ -198,8 +218,8 @@ class MQTTClient:
 
         except json.JSONDecodeError as e:
             logging.error(f"Invalid JSON in payload: {e}")
-        except Exception as e:
-            logging.error(f"Error processing message: {e}")
+        # except Exception as e:
+        #     logging.error(f"Error processing message: {e}")
 
 
 

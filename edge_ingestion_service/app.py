@@ -20,7 +20,7 @@ try:
         config = json.load(f)    
         MQTT_BROKER = config["mqtt_broker"]
         MQTT_PORT = config["mqtt_port"]     
-        DRONE_UID = config["drone_UID"]
+        DRONE_UID = config["drone_UID"] # 2dl check later
 
         SPARKPLUG_NAMESPACE = config["sparkplug_namespace"]
         SP_GROUP_ID = config["sparkplug_group_id"]

@@ -3,3 +3,4 @@ flask-cors
 paho-mqtt<2.0
 psutil
 requests
+influxdb-client

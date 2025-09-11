@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify,send_from_directory
+from flask import Flask, request, jsonify,render_template,send_from_directory
 from utils.logger import setup_logger
 from flask_cors import CORS
 import os
@@ -12,7 +12,7 @@ logging = setup_logger(__name__)
 # ------------------------
 def register_routes(app,publisher):
     CORS(app)   # 👈 enables CORS for all routes
-    @app.get("/")
+    @app.get("/check") #2dl check again
     def root():
         return jsonify({"status": "ok"})
 
@@ -83,10 +83,26 @@ def register_routes(app,publisher):
             #return jsonify({"status": "mqtt disconnected, buffered", "topic": topic}), 202
             return jsonify({"status": "publish failed, ", "topic": topic}), 202
         
+
+    @app.route('/')
+    def index():
+        return render_template('map.html')        
     # @app.get("/publishNbirth") # 2dl check later if required 
     # def publish_nbirth():
         
     #     publisher.sendNbirthMsg()
     #     return jsonify({"status": "Published MQTT birth message" }), 200
 
- 
+    @app.route('/location')
+    def location():  
+        drone_location = publisher.client.get_drone_location() 
+        print(drone_location)
+      
+        if drone_location["lat"] == 0 or drone_location["lon"] == 0:
+            return jsonify({'lat': 0, 'lon': 0})
+        return jsonify({
+            'lat': drone_location["lat"] / 1e7,
+            'lon': drone_location["lon"] / 1e7,
+            'alt': drone_location['alt'],
+            'heading': drone_location['heading'],
+        })
