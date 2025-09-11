@@ -5,5 +5,5 @@
   "sparkplug_namespace": "spBv1.0",
   "sparkplug_group_id": "DumsDroneFleet",
   "sparkplug_device_id": "scadaCloud",  
-  "log_level": "DEBUG" 
+  "log_level": "INFO" 
 }

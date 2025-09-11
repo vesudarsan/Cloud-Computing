@@ -2,8 +2,12 @@ from flask import Flask, request, jsonify,render_template,send_from_directory
 from utils.logger import setup_logger
 from flask_cors import CORS
 import os
+import json
+
 
 logging = setup_logger(__name__)
+
+result = []
 
 #STATIC_FOLDER = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../static"))
 
@@ -94,15 +98,79 @@ def register_routes(app,publisher):
     #     return jsonify({"status": "Published MQTT birth message" }), 200
 
     @app.route('/location')
-    def location():  
-        drone_location = publisher.client.get_drone_location() 
-        print(drone_location)
+    def location():
+        drone = publisher.client.get_drone_location() 
       
-        if drone_location["lat"] == 0 or drone_location["lon"] == 0:
-            return jsonify({'lat': 0, 'lon': 0})
-        return jsonify({
-            'lat': drone_location["lat"] / 1e7,
-            'lon': drone_location["lon"] / 1e7,
-            'alt': drone_location['alt'],
-            'heading': drone_location['heading'],
-        })
+        result = []
+
+        
+        result.append({
+                "id": drone['droneId'],  # use dict key if no droneId inside
+                "lat": drone['lat'] / 1e7,
+                "lon": drone['lon'] / 1e7,
+                "alt": drone.get('alt', 0),
+                "heading": drone.get('heading', 0)
+            })
+     
+        # for drone_id, drone in drone_locations.items():
+        #     if drone.get('lat', 0) == 0 or drone.get('lon', 0) == 0:
+        #         continue
+
+            # result.append({
+            #     'id': drone.get('droneId', drone_id),  # use dict key if no droneId inside
+            #     'lat': drone['lat'] / 1e7,
+            #     'lon': drone['lon'] / 1e7,
+            #     'alt': drone.get('alt', 0),
+            #     'heading': drone.get('heading', 0)
+            # })
+
+        return jsonify(result)
+
+        
+      
+        # if drone_location["lat"] == 0 or drone_location["lon"] == 0:
+        #     return jsonify({'lat': 0, 'lon': 0})
+        # return jsonify({
+        #     'lat': drone_location["lat"] / 1e7,
+        #     'lon': drone_location["lon"] / 1e7,
+        #     'alt': drone_location['alt'],
+        #     'heading': drone_location['heading'],
+        # })
+
+
+        # drone_locations = publisher.client.get_drone_location()  # Already a Python object
+        # print(drone_locations)
+        # print("type ", type(drone_locations))
+     
+
+        # result = []
+        # for drone in drone_locations:
+           
+        #     print(type(drone))
+        #     if drone['lat'] == 0 or drone['lon'] == 0:
+        #         continue
+
+        #     result.append({
+        #         'id': drone.get('droneId', "unknown"),                
+        #         'lat': drone['lat'] / 1e7,
+        #         'lon': drone['lon'] / 1e7,
+        #         'alt': drone['alt'],
+        #         'heading': drone['heading']
+        #     })
+
+        # return jsonify(result)
+
+
+
+
+
+
+      
+        # if drone_location["lat"] == 0 or drone_location["lon"] == 0:
+        #     return jsonify({'lat': 0, 'lon': 0})
+        # return jsonify({
+        #     'lat': drone_location["lat"] / 1e7,
+        #     'lon': drone_location["lon"] / 1e7,
+        #     'alt': drone_location['alt'],
+        #     'heading': drone_location['heading'],
+        # })

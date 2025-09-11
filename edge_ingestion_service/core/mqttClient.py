@@ -112,7 +112,9 @@ class MQTTClient:
         topics = [
    
             f"{self.sparkplug_namespace}/{self.sp_group_id}/NBIRTH/{self.sp_edge_id}/#",
-            f"{self.sparkplug_namespace}/{self.sp_group_id}/DDATA/{self.sp_edge_id}/Mavlink"
+            f"{self.sparkplug_namespace}/{self.sp_group_id}/DDATA/{self.sp_edge_id}/Mavlink",
+            f"{self.sparkplug_namespace}/{self.sp_group_id}/NBIRTH/123456799/#",
+            f"{self.sparkplug_namespace}/{self.sp_group_id}/DDATA/123456799/Mavlink"
         ]
 
         # Subscribe and log each topic
@@ -151,7 +153,7 @@ class MQTTClient:
        
             topic = msg.topic
             droneId = topic.split("/")[-2]
-       
+                
             message_type = None
             if topic.endswith("/Mavlink"):
                 payload = json.loads(msg.payload.decode())                

@@ -1,114 +1,285 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-  <title>DHAKSHA Drones Live Location</title>
   <meta charset="utf-8" />
+  <title> Dhaksha-Drones Tracker (icon 32×32 + colored tooltip)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
   <style>
-    #map {
-      height: 100vh;
-      width: 100%;
+    html, body, #map { height: 100%; margin: 0; padding: 0; }
+    #controls {
+      position: absolute; left: 8px; top: 8px; z-index: 1000;
+      background: rgba(255,255,255,0.95); padding: 8px; border-radius: 6px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.18); font-size: 13px;
     }
-    .drone-icon {
-      transition: transform 0.3s ease;
+    .drone-tooltip { font-size: 12px; line-height: 1.2; }
+    /* wrapper for the PNG (slightly larger than image for padding) */
+    .drone-img-wrap {
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transform-origin: 50% 50%;
     }
-    .leaflet-tooltip.drone-tooltip {
-      background-color: white;
-      border: 1px solid #ccc;
-      padding: 6px 10px;
-      border-radius: 4px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
-      font-size: 13px;
-      font-family: Arial, sans-serif;
+    .drone-img-wrap img {
+      width: 32px;   /* final icon size */
+      height: 32px;
+      display: block;
+      pointer-events: none;
     }
   </style>
 </head>
 <body>
-<h2>DHAKSHA Drones Live Location</h2>
-<div id="map"></div>
+  <div id="controls">
+    <button id="centerAll">Center All</button>
+    Poll (ms): <input id="pollMs" value="2000" style="width:80px" />
+    <button id="refreshNow">Refresh</button>
+  </div>
 
-<!-- Leaflet JS -->
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <div id="map"></div>
 
-<script>
-let map = L.map('map').setView([0.0, 0.0], 15);
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19,
-}).addTo(map);
+  <script>
+  // ---------------- Configuration ----------------
+  const DRONE_ICON_PATH = '/static/icons/drone.png'; // place your PNG here
+  const MAX_PATH_POINTS = 300;
+  const STALE_MS_DEFAULT = 60_000;
 
-let path = [];
-let polyline = L.polyline([], { color: 'blue' }).addTo(map);
+  // ---------------- State ----------------
+  let map;
+  const droneMarkers = {};
+  const startMarkers = {};
+  const dronePaths = {};
+  const lastSeen = {};
+  let pollIntervalId = null;
 
-let droneIcon = L.icon({
-  iconUrl: '/static/icons/drone.png', // Update to your actual path
-  iconSize: [50, 50],
-  iconAnchor: [25, 25],
-  className: 'drone-icon'
-});
-
-let droneMarker = null;
-let startMarker = null;
-
-function updateDrone(lat, lon, alt, heading) {
-  const latlng = [lat, lon];
-  const latText = lat.toFixed(6);
-  const lonText = lon.toFixed(6);
-  const altText = alt.toFixed(2);
-  const headingText = heading.toFixed(2);
-
-  const tooltipContent = `
-    <div style="line-height: 1.4;">
-      <b style="color: #333;">Lat:</b> <span style="color: #2a9d8f;">${latText}</span><br>
-      <b style="color: #333;">Lon:</b> <span style="color: #e76f51;">${lonText}</span><br>
-      <b style="color: #333;">Alt:</b> <span style="color: #f4a261;">${altText} m</span><br>
-      <b style="color: #333;">Heading:</b> <span style="color: #264653;">${headingText}°</span>
-    </div>
-  `;
-
-  if (!droneMarker) {
-    droneMarker = L.marker(latlng, { icon: droneIcon }).addTo(map);
-    droneMarker.bindTooltip(tooltipContent, {
-      permanent: false,
-      direction: 'top',
-      offset: [0, -25],
-      className: 'drone-tooltip'
-    }).openTooltip();
-
-    startMarker = L.circleMarker(latlng, {
-      radius: 6,
-      color: 'green',
-      fillColor: 'green',
-      fillOpacity: 1
+  // ---------------- Utilities ----------------
+  function initMap() {
+    map = L.map('map').setView([20.5937, 78.9629], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
-
-    map.setView(latlng, 17);
-  } else {
-    droneMarker.setLatLng(latlng);
-    droneMarker.setTooltipContent(tooltipContent);
   }
 
-  // Add to path
-  path.push(latlng);
-  polyline.setLatLngs(path);
-}
+  // deterministic color pick from id string
+  function getColorForId(id) {
+    const palette = [
+      '#1f78b4','#e31a1c','#33a02c','#ff7f00',
+      '#6a3d9a','#b15928','#a6cee3','#fb9a99',
+      '#b2df8a','#fdbf6f','#cab2d6','#ffff99'
+    ];
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) {
+      hash = ((hash << 5) - hash) + id.charCodeAt(i);
+      hash |= 0;
+    }
+    return palette[Math.abs(hash) % palette.length];
+  }
 
-function fetchLocation() {
-  fetch('/location')
-    .then(response => response.json())
-    .then(data => {
-      if (data.lat !== 0 && data.lon !== 0) {
-        updateDrone(data.lat, data.lon, data.alt, data.heading);
+  // create a DivIcon using the static PNG, rotated by heading
+  function makeDroneIconFromStatic(heading = 0) {
+    const html = `<div class="drone-img-wrap" style="transform: rotate(${heading}deg);">
+                    <img src="${DRONE_ICON_PATH}" alt="drone" />
+                  </div>`;
+    return L.divIcon({
+      html,
+      className: 'drone-divicon',
+      iconSize: [36, 36],    // match wrapper
+      iconAnchor: [18, 18],  // center on map
+      popupAnchor: [0, -18]
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                    .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+  }
+
+  // ---------------- Core: create/update/remove drones ----------------
+  function updateDrone(drone) {
+    const id = String(drone.id || drone.droneId || drone.id_str || Date.now());
+    let lat = Number(drone.lat);
+    let lon = Number(drone.lon);
+    const alt = Number.isFinite(Number(drone.alt)) ? Number(drone.alt) : 0;
+    const heading = Number.isFinite(Number(drone.heading)) ? Number(drone.heading) : 0;
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+    // auto-normalize if coordinates look scaled (e.g., 1e7)
+    if (Math.abs(lat) > 1e6) lat = lat / 1e7;
+    if (Math.abs(lon) > 1e6) lon = lon / 1e7;
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    if (lat === 0 && lon === 0) return; // ignore placeholders
+
+    const latlng = [lat, lon];
+    const color = getColorForId(id);
+
+    // tooltip with different colors per parameter
+    const tooltipContent = `
+      <div class="drone-tooltip">
+        <b style="color:#333;">ID:</b> <span style="color:${color};">${escapeHtml(id)}</span><br>
+        <b style="color:#333;">Lat:</b> <span style="color:#2a9d8f;">${lat.toFixed(6)}</span><br>
+        <b style="color:#333;">Lon:</b> <span style="color:#e76f51;">${lon.toFixed(6)}</span><br>
+        <b style="color:#333;">Alt:</b> <span style="color:#f4a261;">${alt.toFixed(2)} m</span><br>
+        <b style="color:#333;">Heading:</b> <span style="color:#264653;">${heading.toFixed(1)}°</span>
+      </div>
+    `;
+
+    if (!droneMarkers[id]) {
+      // create marker using static PNG DivIcon (rotated)
+      const marker = L.marker(latlng, { icon: makeDroneIconFromStatic(heading) }).addTo(map);
+      marker.bindTooltip(tooltipContent, { permanent: false, direction: 'top', offset: [0, -20] });
+
+      // add green start marker
+      const start = L.circleMarker(latlng, {
+        radius: 6,
+        color: 'green',
+        weight: 1,
+        fillColor: 'green',
+        fillOpacity: 1
+      }).addTo(map);
+
+      // path polyline colored per drone id
+      const polyline = L.polyline([latlng], { color: color, weight: 3, opacity: 0.9 }).addTo(map);
+
+      droneMarkers[id] = marker;
+      startMarkers[id] = start;
+      dronePaths[id] = { path: [latlng], polyline };
+
+      // center map on first drone created
+      if (Object.keys(droneMarkers).length === 1) {
+        map.setView(latlng, 16);
       }
-    })
-    .catch(console.error);
-}
+    } else {
+      // update existing marker
+      const marker = droneMarkers[id];
 
-// Update every 1 second
-setInterval(fetchLocation, 1000);
-</script>
+      // rotate by replacing DivIcon (keeps image crisp)
+      marker.setIcon(makeDroneIconFromStatic(heading));
+
+      marker.setLatLng(latlng);
+
+      // update tooltip
+      const tip = marker.getTooltip();
+      if (tip) tip.setContent(tooltipContent);
+      else marker.bindTooltip(tooltipContent);
+
+      // update path
+      const dp = dronePaths[id];
+      dp.path.push(latlng);
+      if (dp.path.length > MAX_PATH_POINTS) dp.path.shift();
+      dp.polyline.setLatLngs(dp.path);
+    }
+
+    lastSeen[id] = Date.now();
+  }
+
+  function removeDrone(id) {
+    if (droneMarkers[id]) { map.removeLayer(droneMarkers[id]); delete droneMarkers[id]; }
+    if (startMarkers[id])  { map.removeLayer(startMarkers[id]);  delete startMarkers[id]; }
+    if (dronePaths[id])    { map.removeLayer(dronePaths[id].polyline); delete dronePaths[id]; }
+    delete lastSeen[id];
+  }
+
+  function cleanupStaleDrones(staleMs = STALE_MS_DEFAULT) {
+    const now = Date.now();
+    for (const id of Object.keys(lastSeen)) {
+      if (now - lastSeen[id] > staleMs) {
+        removeDrone(id);
+      }
+    }
+  }
+
+  // ---------------- Fetching and normalization ----------------
+  async function fetchLocationOnce() {
+    try {
+      const resp = await fetch('/location', { cache: 'no-store' });
+      if (!resp.ok) throw new Error('Network error: ' + resp.status);
+      const data = await resp.json();
+
+      // accept array, dict-of-dicts, or single object
+      if (!Array.isArray(data)) {
+        if (data && typeof data === 'object') {
+          const vals = Object.values(data);
+          if (vals.length && vals.every(v => typeof v === 'object')) {
+            vals.forEach(v => updateDrone(v));
+          } else {
+            updateDrone(data);
+          }
+        }
+        return;
+      }
+
+      data.forEach(item => {
+        if (!item) return;
+        if (typeof item === 'string') {
+          try { item = JSON.parse(item); } catch { return; }
+        }
+        if (typeof item !== 'object') return;
+
+        let lat = item.lat, lon = item.lon;
+        if (typeof lat === 'string') lat = Number(lat);
+        if (typeof lon === 'string') lon = Number(lon);
+        if (Number.isFinite(lat) && Math.abs(lat) > 1e6) lat = lat / 1e7;
+        if (Number.isFinite(lon) && Math.abs(lon) > 1e6) lon = lon / 1e7;
+
+        const normalized = {
+          id: item.id || item.droneId || item.id_str,
+          lat: lat,
+          lon: lon,
+          alt: item.alt,
+          heading: item.heading
+        };
+        if (normalized.id && Number.isFinite(normalized.lat) && Number.isFinite(normalized.lon)) {
+          updateDrone(normalized);
+        }
+      });
+
+      cleanupStaleDrones();
+    } catch (err) {
+      console.error('fetchLocationOnce error:', err);
+    }
+  }
+
+  function startPolling() {
+    stopPolling();
+    const ms = Number(document.getElementById('pollMs').value) || 2000;
+    fetchLocationOnce();
+    pollIntervalId = setInterval(fetchLocationOnce, ms);
+  }
+  function stopPolling() {
+    if (pollIntervalId) { clearInterval(pollIntervalId); pollIntervalId = null; }
+  }
+
+  // ---------------- UI helpers ----------------
+  function centerAllDrones() {
+    const ids = Object.keys(droneMarkers);
+    if (!ids.length) return;
+    const latlngs = ids.map(id => {
+      const ll = droneMarkers[id].getLatLng();
+      return [ll.lat, ll.lng];
+    });
+    const bounds = L.latLngBounds(latlngs);
+    map.fitBounds(bounds.pad(0.25));
+  }
+
+  // ---------------- Init ----------------
+  document.addEventListener('DOMContentLoaded', () => {
+    initMap();
+    document.getElementById('centerAll').addEventListener('click', centerAllDrones);
+    document.getElementById('refreshNow').addEventListener('click', fetchLocationOnce);
+    document.getElementById('pollMs').addEventListener('change', startPolling);
+
+    startPolling();
+  });
+  </script>
 </body>
 </html>
