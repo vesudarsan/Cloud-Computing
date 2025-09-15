@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title> Dhaksha-Drones Tracker (icon 32×32 + colored tooltip)</title>
+  <title> Dhaksha-Drones Tracker </title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <!-- Leaflet CSS -->
@@ -18,16 +18,16 @@
     .drone-tooltip { font-size: 12px; line-height: 1.2; }
     /* wrapper for the PNG (slightly larger than image for padding) */
     .drone-img-wrap {
-      width: 36px;
-      height: 36px;
+      width: 56px;
+      height: 56px;
       display: flex;
       align-items: center;
       justify-content: center;
       transform-origin: 50% 50%;
     }
     .drone-img-wrap img {
-      width: 32px;   /* final icon size */
-      height: 32px;
+      width: 52px;   /* final icon size */
+      height: 52px;
       display: block;
       pointer-events: none;
     }
@@ -91,9 +91,9 @@
     return L.divIcon({
       html,
       className: 'drone-divicon',
-      iconSize: [36, 36],    // match wrapper
-      iconAnchor: [18, 18],  // center on map
-      popupAnchor: [0, -18]
+      iconSize: [52, 52],    // match wrapper
+      iconAnchor: [32, 32],  // center on map
+      popupAnchor: [0, -32]
     });
   }
 
