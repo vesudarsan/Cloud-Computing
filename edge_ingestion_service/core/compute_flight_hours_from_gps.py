@@ -4,9 +4,14 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
-
+import platform
 # ---------------- CONFIG ----------------
-INFLUX_URL   = os.getenv("INFLUX_URL", "http://localhost:8086")
+# INFLUX_URL   = os.getenv("INFLUX_URL", "http://localhost:8086")
+
+if platform.system() == "Windows":  # 2dl read from config
+    INFLUX_URL = "http://localhost:8086"
+else:
+    INFLUX_URL = "http://host.docker.internal:8086"
 INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "UGFYphuRbH-x-KTWrHfiQNbNSH2Wg1R9KPHkp0Ga8WRlbkGTMB2-w2-e8J9xKDMQgotVdhLEHVr82Ll9W7VXvw==")  # avoid committing this
 INFLUX_ORG   = os.getenv("INFLUX_ORG", "5ea549634c8f37ac")
 
