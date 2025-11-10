@@ -41,10 +41,10 @@ MIN_SESSION_SEC = int(os.getenv("MIN_SESSION_SEC", "5"))
 
 # Measurements/fields to write
 MEAS_SUMMARY   = os.getenv("MEAS_SUMMARY", "flight_hours")              # per-window
-MEAS_SESSION   = os.getenv("MEAS_SESSION", "flight_session")            # per-session (optional)
-MEAS_CUMUL     = os.getenv("MEAS_CUMUL", "flight_hours_cumulative")     # running total
+# MEAS_SESSION   = os.getenv("MEAS_SESSION", "flight_session")            # per-session (optional)
+# MEAS_CUMUL     = os.getenv("MEAS_CUMUL", "flight_hours_cumulative")     # running total
 FIELD_HOURS    = os.getenv("FIELD_HOURS", "hours")
-FIELD_SECONDS  = os.getenv("FIELD_SECONDS", "seconds")
+# FIELD_SECONDS  = os.getenv("FIELD_SECONDS", "seconds")
 
 WRITE_SESSIONS = os.getenv("WRITE_SESSIONS", "1") == "1"
 
@@ -155,26 +155,26 @@ from(bucket: "{bucket}")
         return 0.0
 
 
-def get_last_cumulative_hours(qapi, bucket, drone_tag, drone_id, before_time):
-    q = f'''
-from(bucket: "{bucket}")
-  |> range(start: 0, stop: {before_time.isoformat()})
-  |> filter(fn: (r) => r._measurement == "{MEAS_CUMUL}")
-  |> filter(fn: (r) => r.{drone_tag} == "{drone_id}")
-  |> filter(fn: (r) => r._field == "{FIELD_HOURS}")
-  |> last()
-  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
-  |> keep(columns: ["_time","{FIELD_HOURS}"])
-'''
-    df = qapi.query_data_frame(q)
-    if isinstance(df, list) and df:
-        df = pd.concat(df, ignore_index=True)
-    if df is None or df.empty or FIELD_HOURS not in df:
-        return 0.0
-    try:
-        return float(df[FIELD_HOURS].iloc[0])
-    except Exception:
-        return 0.0
+# def get_last_cumulative_hours(qapi, bucket, drone_tag, drone_id, before_time):
+#     q = f'''
+# from(bucket: "{bucket}")
+#   |> range(start: 0, stop: {before_time.isoformat()})
+#   |> filter(fn: (r) => r._measurement == "{MEAS_CUMUL}")
+#   |> filter(fn: (r) => r.{drone_tag} == "{drone_id}")
+#   |> filter(fn: (r) => r._field == "{FIELD_HOURS}")
+#   |> last()
+#   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+#   |> keep(columns: ["_time","{FIELD_HOURS}"])
+# '''
+#     df = qapi.query_data_frame(q)
+#     if isinstance(df, list) and df:
+#         df = pd.concat(df, ignore_index=True)
+#     if df is None or df.empty or FIELD_HOURS not in df:
+#         return 0.0
+#     try:
+#         return float(df[FIELD_HOURS].iloc[0])
+#     except Exception:
+#         return 0.0
 
 # -------------- MAIN --------------------
 def main():
@@ -186,6 +186,7 @@ def main():
     now_utc = datetime.now(timezone.utc)
     safe_summary_time = min(END, now_utc - timedelta(seconds=1))
 
+    # 1) Query window data
     df = qapi.query_data_frame(build_flux_query())
     if isinstance(df, list):
         df = pd.concat(df, ignore_index=True) if df else pd.DataFrame()
@@ -196,95 +197,100 @@ def main():
         client.close()
         return
 
-    # Ensure tag column exists (client sometimes mangles names)
+    # Ensure tag column exists
     if DRONE_TAG not in df.columns:
         guess = next((c for c in df.columns if c.startswith(DRONE_TAG)), None)
         if guess:
             df[DRONE_TAG] = df[guess]
         else:
-            # If querying one drone only, inject the value
-            if DRONE_VALUE:
-                df[DRONE_TAG] = DRONE_VALUE
-            else:
-                df[DRONE_TAG] = "DRONE"
+            df[DRONE_TAG] = DRONE_VALUE if DRONE_VALUE else "DRONE"
 
     df = df.dropna(subset=["_time"]).copy()
 
-    # ---- Detect sessions per drone ----
-    results = []     # (drone_id, window_sec, window_hours, sessions)
+    # 2) Detect sessions and total hours per drone
+    results = []  # (drone_id, total_hours)
     for drone_id, g in df.groupby(DRONE_TAG):
         sessions = detect_sessions(g[["_time", FIELD_RELALT, FIELD_VX, FIELD_VY]])
         total_sec = sum(d for _, _, d in sessions)
         total_hours = total_sec / 3600.0
-        results.append((str(drone_id), total_sec, total_hours, sessions))
+        results.append((str(drone_id), total_hours))
 
-    # ---- Build summary & cumulative points (idempotent) ----
+    # 3) Build ONLY 'flight_hours' points (hours field)
     summary_points = []
-    cumulative_points = []
-    session_points = []
-
-    for drone_id, window_sec, window_hours, sessions in results:
-        # read already-written window hours (if any)
-        existed_hours = get_existing_window_hours(qapi, OUT_BUCKET, DRONE_TAG, drone_id, START, END)
-
-        # delta to add to cumulative
-        delta_hours = round(window_hours - existed_hours, 6)
-        delta_seconds = round(window_sec - existed_hours * 3600.0, 3)
-
-        # read last cumulative BEFORE this window
-        base_total_hours = get_last_cumulative_hours(qapi, OUT_BUCKET, DRONE_TAG, drone_id, START)
-
-        # compute new cumulative (allow negatives only if you want retro corrections)
-        new_total_hours = round(base_total_hours + max(delta_hours, 0.0), 6)
-        new_total_seconds = round(new_total_hours * 3600.0, 3)
-
-        # per-window summary (overwrite for this window)
-        sp = (
-            Point(MEAS_SUMMARY)
+    for drone_id, total_hours in results:
+        p = (
+            Point(MEAS_SUMMARY)                      # default: "flight_hours"
             .tag(DRONE_TAG, drone_id)
             .tag("window_start", START.isoformat())
             .tag("window_end", END.isoformat())
-            .field(FIELD_SECONDS, round(window_sec, 3))
-            .field(FIELD_HOURS, round(window_hours, 6))
+            .field(FIELD_HOURS, round(total_hours, 6))  # ONLY 'hours'
             .time(safe_summary_time, WritePrecision.NS)
         )
-        summary_points.append(sp)
+        summary_points.append(p)
 
-        # cumulative total at window end
-        cp = (
-            Point(MEAS_CUMUL)
-            .tag(DRONE_TAG, drone_id)
-            .field(FIELD_SECONDS, new_total_seconds)
-            .field(FIELD_HOURS, new_total_hours)
-            .time(safe_summary_time, WritePrecision.NS)
-        )
-        cumulative_points.append(cp)
-
-        # optional: write each session row
-        if WRITE_SESSIONS and sessions:
-            for s_start, s_end, dur in sessions:
-                session_points.append(
-                    Point(MEAS_SESSION)
-                    .tag(DRONE_TAG, drone_id)
-                    .tag("start", s_start.isoformat())
-                    .tag("end", s_end.isoformat())
-                    .field("duration_sec", round(dur, 3))
-                    .time(s_end, WritePrecision.NS)
-                )
-
-    # ---- Writes (synchronous) ----
+    # 4) Write summaries (synchronous)
     if summary_points:
         wapi.write(bucket=OUT_BUCKET, record=summary_points)
-    if cumulative_points:
-        wapi.write(bucket=OUT_BUCKET, record=cumulative_points)
-    if session_points:
-        wapi.write(bucket=OUT_BUCKET, record=session_points)
 
-    # log
-    for drone_id, window_sec, window_hours, _ in results:
-        print(f"{drone_id}: window={window_hours:.3f} h ({window_sec:.0f} s) | cumulative written at {safe_summary_time.isoformat()}")
+    # 5) Log
+    for drone_id, total_hours in results:
+        print(f"{drone_id}: window={total_hours:.3f} h | wrote to '{OUT_BUCKET}' at {safe_summary_time.isoformat()}")
 
     client.close()
+
+
+# 🧭 What the current code does (your modified version)
+
+# Each time it runs:
+
+# It looks at telemetry (GLOBAL_POSITION_INT) only within the current window
+# (between WINDOW_START and WINDOW_END — typically 1 flight or 1 day)
+
+# It computes how long the drone was in the air in that period
+
+# It writes only that window’s flight duration, e.g.:
+
+# _time	drone_id	window_start	window_end	hours
+# 2025-11-06T12:00Z	123456789	2025-11-04T00:00Z	2025-11-06T00:00Z	1.53
+# So if you run it again tomorrow for another day, you’ll get another independent row.
+
+# ✅ Advantage:
+
+# Each row = an atomic flight window (perfect for daily/hourly analytics in Grafana).
+
+# You can always calculate totals using Flux or Grafana (e.g. sum() over time).
+
+# ❌ Limitation:
+
+# # It doesn’t keep an accumulated total over the drone’s lifetime (e.g., “Drone A has flown 142 hours total”).
+# ⚙️ If you want aggregated (lifetime cumulative) hours too
+
+# You have two options:
+
+# Option 1: Keep your current per-window writes (simple)
+
+# Then calculate total hours in queries:
+
+# from(bucket: "drone_telemetry")
+#   |> range(start: -365d)
+#   |> filter(fn: (r) => r._measurement == "flight_hours")
+#   |> filter(fn: (r) => r._field == "hours" and r.drone_id == "123456789")
+#   |> sum()
+
+# in seconds (if needed):
+# from(bucket: "drone_telemetry")
+#   |> range(start: -365d)
+#   |> filter(fn: (r) => r._measurement == "flight_hours")
+#   |> filter(fn: (r) => r._field == "hours" and r.drone_id == "123456789")
+#   |> sum()
+#   |> map(fn: (r) => ({
+#         r with
+#         _field: "seconds",
+#         _value: r._value * 3600.0
+#   }))
+
+
+# That’s the easiest — no schema changes, aggregation happens on query.
 
 if __name__ == "__main__":
     main()
