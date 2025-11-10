@@ -4,3 +4,4 @@ paho-mqtt<2.0
 psutil
 requests
 influxdb-client
+pandas
