@@ -304,3 +304,7 @@ def register_routes(app,publisher):
         except Exception as e:
             logging.exception("landings endpoint failed")
             return jsonify({"error": f"Failed to query landings: {e}"}), 500
+
+    @app.route("/stats.html")
+    def stats_page():
+        return send_from_directory("static", "stats.html")

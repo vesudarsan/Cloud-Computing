@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Drone Flight Stats</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0b1020; --card:#121a33; --text:#e9ecf1; --muted:#9aa4b2; --accent:#6ea8fe; }
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(180deg,#0a0f1f,#0d1530);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,Arial}
+    .wrap{max-width:900px;margin:36px auto;padding:0 16px}
+    h1{font-size:22px;margin:0 0 16px}
+    .card{background:var(--card);border:1px solid #1e2a52;border-radius:14px;padding:16px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
+    .row{display:grid;gap:12px}
+    @media(min-width:720px){.row{grid-template-columns:1fr 1fr}}
+    label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+    input,select,button{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #273459;background:#0f1630;color:var(--text)}
+    button{cursor:pointer;background:linear-gradient(180deg,#1e2d66,#1a2660);border:1px solid #2b3e7a}
+    button:hover{filter:brightness(1.05)}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+    .stat{background:#0f1630;border:1px solid #223064;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:8px}
+    .stat .label{color:var(--muted);font-size:12px;letter-spacing:.4px;text-transform:uppercase}
+    .stat .value{font-size:28px;font-weight:700}
+    .muted{color:var(--muted);font-size:12px}
+    .err{color:#ff8383}
+    .footer{margin-top:18px;color:var(--muted);font-size:12px}
+    .flex{display:flex;gap:10px;align-items:end}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🚁 Drone Flight Stats</h1>
+    <div class="card">
+      <div class="row">
+        <div>
+          <label for="droneId">Drone ID</label>
+          <input id="droneId" placeholder="e.g. 123456789" />
+        </div>
+        <div>
+          <label for="unit">Units</label>
+          <select id="unit">
+            <option value="hours" selected>Hours</option>
+            <option value="seconds">Seconds</option>
+          </select>
+        </div>
+        <div>
+          <label for="start">Start (ISO, optional)</label>
+          <input id="start" placeholder="2025-11-01T00:00:00Z" />
+        </div>
+        <div>
+          <label for="end">End (ISO, optional)</label>
+          <input id="end" placeholder="2025-11-07T00:00:00Z" />
+        </div>
+      </div>
+
+      <div class="flex" style="margin-top:12px">
+        <button id="loadBtn">Load Stats</button>
+        <button id="resetBtn">Reset</button>
+        <span id="status" class="muted"></span>
+      </div>
+
+      <div class="grid">
+        <div class="stat">
+          <div class="label">Total Flying</div>
+          <div id="fhValue" class="value">—</div>
+          <div id="fhMeta" class="muted">window: last 365 days</div>
+        </div>
+        <div class="stat">
+          <div class="label">Landing Count</div>
+          <div id="landValue" class="value">—</div>
+          <div id="landMeta" class="muted">window: last 365 days</div>
+        </div>
+      </div>
+
+      <div id="error" class="err" style="margin-top:12px"></div>
+      <div class="footer">Uses <code>/flight-hours</code> and <code>/landings</code> API endpoints from your Flask app.</div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function qs(params) {
+      return Object.entries(params)
+        .filter(([,v]) => v !== undefined && v !== null && String(v).trim() !== "")
+        .map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+        .join("&");
+    }
+
+    async function fetchJSON(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+
+    function fmt(val, unit) {
+      if (val === null || val === undefined || isNaN(val)) return "—";
+      if (unit === "hours") return Number(val).toFixed(2) + " h";
+      if (unit === "seconds") return Number(val).toFixed(0) + " s";
+      return String(val);
+    }
+
+    async function loadStats() {
+      $("error").textContent = "";
+      $("status").textContent = "Loading…";
+      const droneId = $("droneId").value.trim();
+      const unit = $("unit").value;
+      const start = $("start").value.trim();
+      const end = $("end").value.trim();
+
+      if (!droneId) {
+        $("error").textContent = "Please enter a drone ID.";
+        $("status").textContent = "";
+        return;
+      }
+
+      const base = ""; // same origin
+      const q = { drone_id: droneId, unit, start, end };
+      const fhURL = `${base}/flight-hours?${qs(q)}`;
+      const ldURL = `${base}/landings?${qs({ drone_id: droneId, start, end })}`;
+
+      try {
+        const [fh, ld] = await Promise.all([fetchJSON(fhURL), fetchJSON(ldURL)]);
+        $("fhValue").textContent = fmt(fh.value, unit);
+        $("fhMeta").textContent = `window: ${fh.start} → ${fh.end}`;
+        $("landValue").textContent = (ld.landings ?? "—");
+        $("landMeta").textContent = `window: ${ld.start} → ${ld.end}`;
+        $("status").textContent = "Updated";
+      } catch (e) {
+        $("error").textContent = `Failed to load stats: ${e.message}`;
+        $("status").textContent = "";
+      }
+    }
+
+    $("loadBtn").addEventListener("click", loadStats);
+    $("resetBtn").addEventListener("click", () => {
+      $("droneId").value = "";
+      $("start").value = "";
+      $("end").value = "";
+      $("fhValue").textContent = "—";
+      $("landValue").textContent = "—";
+      $("fhMeta").textContent = "window: last 365 days";
+      $("landMeta").textContent = "window: last 365 days";
+      $("status").textContent = "";
+      $("error").textContent = "";
+    });
+  </script>
+</body>
+</html>
