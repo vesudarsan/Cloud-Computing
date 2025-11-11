@@ -9,7 +9,7 @@ from utils.influx_writer import InfluxWriter
 import math, os, threading, subprocess
 from datetime import datetime, timezone, timedelta
 from utils.rest_client import RestClient
-from collections import defaultdict
+from collections import defaultdict,deque
 
 logging = setup_logger(__name__)
 
@@ -67,6 +67,84 @@ class MQTTClient:
         self._compute_lock = threading.Lock()     # optional global lock (kept for safety)
         self._inflight_by_drone = defaultdict(bool)  # {droneId: bool}
         self._last_window = {}                       # {droneId: (start_iso, end_iso)}
+
+        self._buf = {}  # {drone_id: deque of samples (ts, alt_m, v_h, v_vert)}
+        self._imu = {}  # {drone_id: last accel magnitude, g}
+        self._buf_len_sec = float(os.getenv("CRASH_BUF_SEC", "3.0"))
+
+    ## Code for buffering and impact detection , used to detect impacts like crashes and hard landings
+    def _buf_get(self, drone_id):
+        q = self._buf.get(drone_id)
+        if q is None:
+            q = deque()
+            self._buf[drone_id] = q
+        return q
+
+    def _push_sample(self, drone_id, ts, rel_alt_mm, vx_cms, vy_cms):
+        q = self._buf_get(drone_id)
+        alt_m = (rel_alt_mm or 0)/1000.0
+        v_h = ( ((vx_cms or 0)**2 + (vy_cms or 0)**2) ** 0.5 ) / 100.0  # m/s
+        # estimate vertical speed from alt derivative using last sample
+        v_vert = 0.0
+        if q:
+            (ts_prev, alt_prev, _, _) = q[-1]
+            dt = (ts - ts_prev).total_seconds()
+            if dt > 0:
+                v_vert = (alt_m - alt_prev) / dt
+        q.append((ts, alt_m, v_h, v_vert))
+        # trim older than buffer window
+        while q and (ts - q[0][0]).total_seconds() > self._buf_len_sec:
+            q.popleft()
+
+    def _update_imu(self, drone_id, xacc, yacc, zacc):
+        # if you have HIGHRES_IMU (m/s^2), store magnitude in g
+        g = ( (xacc or 0)**2 + (yacc or 0)**2 + (zacc or 0)**2 ) ** 0.5 / 9.80665
+        self._imu[drone_id] = g
+
+    def _detect_impact(self, drone_id):
+        q = self._buf_get(drone_id)
+        if len(q) < 3:
+            return None  # not enough data
+
+        # Look at the last ~1 s window
+        ts_end = q[-1][0]
+        recent = [s for s in q if (ts_end - s[0]).total_seconds() <= 1.2]
+        if len(recent) < 3:
+            return None
+
+        # pre-touch metrics (max before last)
+        pre = recent[:-1]
+        v_h_pre   = max(p[2] for p in pre)
+        v_vert_dn = min(p[3] for p in pre)  # negative when descending
+
+        # post-touch metrics (last point)
+        v_h_last  = recent[-1][2]
+        alt_last  = recent[-1][1]
+        v_vert_last = recent[-1][3]
+
+        # thresholds (tunable via env)
+        VDN_HARD = float(os.getenv("CRASH_VDN_HARD", "2.5"))   # m/s downwards
+        VH_HARD  = float(os.getenv("CRASH_VH_HARD",  "2.0"))   # m/s horiz
+        VDN_CRIT = float(os.getenv("CRASH_VDN_CRIT", "4.0"))
+        VH_ZERO  = float(os.getenv("CRASH_VH_ZERO",  "0.5"))   # ~stopped
+        ALT_END  = float(os.getenv("FS_ALT_END", "0.8"))
+        G_IMPACT = float(os.getenv("CRASH_G_IMPACT", "15.0"))  # 15g
+
+        # IMU spike (if present)
+        g_peak = self._imu.get(drone_id, 0.0)
+
+        hard = (v_vert_dn <= -VDN_HARD and v_h_pre >= VH_HARD and v_h_last <= VH_ZERO and alt_last <= ALT_END)
+        crit = (g_peak >= G_IMPACT) or (v_vert_dn <= -VDN_CRIT and v_h_last <= VH_ZERO and alt_last <= ALT_END)
+
+        if crit:
+            return ("crash", "critical", {
+                "v_down": round(-v_vert_dn, 2), "v_h_pre": round(v_h_pre, 2), "g": round(g_peak,1)
+            })
+        if hard:
+            return ("hard_landing", "warn", {
+                "v_down": round(-v_vert_dn, 2), "v_h_pre": round(v_h_pre, 2), "g": round(g_peak,1)
+            })
+        return None
 
     def connect(self, topic, lwt_message, qos=1, retain=True):
         self.client.on_connect = self._on_connect
@@ -274,6 +352,16 @@ class MQTTClient:
         # Convert units
         alt_m  = (rel_alt_mm or 0)/1000.0
         spd_ms = math.sqrt((vx_cms or 0)**2 + (vy_cms or 0)**2)/100.0
+
+        # --- NEW: Feed rolling buffer & check crash/hard landing ---
+        self._push_sample(drone_id, ts, rel_alt_mm, vx_cms, vy_cms)
+        impact = self._detect_impact(drone_id)
+        if impact:
+            event, severity, meta = impact
+            logging.warning(f"[{drone_id}] Impact detected: {event} ({severity}) {meta}")
+            self.influx_writer.write_alarm_event(
+                drone_id=drone_id, ts=ts, event=event, severity=severity, meta=meta
+        )
 
         above_start = (alt_m >= ALT_START) or (spd_ms >= SPD_START)
         below_end   = (alt_m <= ALT_END)   and (spd_ms <= SPD_END)

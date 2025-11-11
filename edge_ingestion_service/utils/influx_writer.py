@@ -55,6 +55,28 @@ class InfluxWriter:
         except Exception as e:
             logging.error(f"❌ Failed to write landing event: {e}")
 
+
+    def write_alarm_event(self, drone_id: str, ts, event: str, severity: str, meta: dict | None = None):
+        try:
+            p = (Point("flight_alarms")
+                .tag("drone_id", drone_id)
+                .tag("event", event)           # "hard_landing" | "crash"
+                .tag("severity", severity)     # "warn" | "critical"
+                .field("count", 1))
+            if meta:
+                for k, v in meta.items():
+                    # store numeric meta as fields; stringify others
+                    if isinstance(v, (int, float)):
+                        p = p.field(k, v)
+                    else:
+                        p = p.tag(k, str(v))
+            p = p.time(ts, WritePrecision.NS)
+            self.write_api.write(bucket=self.bucket, org=self.org, record=p)
+            logging.debug(f"📤 Alarm event written for {drone_id}: {event}/{severity}")
+        except Exception as e:
+            logging.error(f"❌ Failed to write alarm event: {e}")
+
+
     def close(self):
         self.client.close()
         logging.info("✅ InfluxDB disconnected")

@@ -5,18 +5,20 @@
   <title>Drone Flight Stats</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root { --bg:#0b1020; --card:#121a33; --text:#e9ecf1; --muted:#9aa4b2; --accent:#6ea8fe; }
-    *{box-sizing:border-box} body{margin:0;background:linear-gradient(180deg,#0a0f1f,#0d1530);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,Arial}
-    .wrap{max-width:900px;margin:36px auto;padding:0 16px}
+    :root { --bg:#0b1020; --card:#121a33; --text:#e9ecf1; --muted:#9aa4b2; --accent:#6ea8fe; --ok:#3ecf8e; --warn:#f6c64b; --crit:#ff5f5f; }
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(180deg,#0a0f1f,#0d1530);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,Arial}
+    .wrap{max-width:1000px;margin:36px auto;padding:0 16px}
     h1{font-size:22px;margin:0 0 16px}
     .card{background:var(--card);border:1px solid #1e2a52;border-radius:14px;padding:16px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
     .row{display:grid;gap:12px}
-    @media(min-width:720px){.row{grid-template-columns:1fr 1fr}}
+    @media(min-width:880px){.row{grid-template-columns:repeat(4,1fr)}}
     label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
     input,select,button{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #273459;background:#0f1630;color:var(--text)}
     button{cursor:pointer;background:linear-gradient(180deg,#1e2d66,#1a2660);border:1px solid #2b3e7a}
     button:hover{filter:brightness(1.05)}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:16px}
+    @media(max-width:880px){.grid{grid-template-columns:1fr}}
     .stat{background:#0f1630;border:1px solid #223064;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:8px}
     .stat .label{color:var(--muted);font-size:12px;letter-spacing:.4px;text-transform:uppercase}
     .stat .value{font-size:28px;font-weight:700}
@@ -24,11 +26,19 @@
     .err{color:#ff8383}
     .footer{margin-top:18px;color:var(--muted);font-size:12px}
     .flex{display:flex;gap:10px;align-items:end}
+    .list{margin-top:12px;border-top:1px solid #243366}
+    .item{display:grid;grid-template-columns:140px 110px 1fr;gap:10px;padding:10px 0;border-bottom:1px dashed #223064;align-items:center}
+    .sev{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px}
+    .sev.warn{background:rgba(246,198,75,.15);border:1px solid #f6c64b;color:#f6c64b}
+    .sev.critical{background:rgba(255,95,95,.12);border:1px solid #ff5f5f;color:#ff5f5f}
+    .sev.ok{background:rgba(62,207,142,.12);border:1px solid #3ecf8e;color:#3ecf8e}
+    .kv{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; color:#cfd5e6}
+    .pill{display:inline-block;padding:2px 6px;border-radius:8px;border:1px solid #2a3a74;background:#0c1430;color:#9fb2ff;font-size:11px;margin-left:6px}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>🚁 Drone Flight Stats</h1>
+    <h1>🚁 Drone Flight Stats & Alarms</h1>
     <div class="card">
       <div class="row">
         <div>
@@ -69,15 +79,31 @@
           <div id="landValue" class="value">—</div>
           <div id="landMeta" class="muted">window: last 365 days</div>
         </div>
+        <div class="stat">
+          <div class="label">Crash / Hard-Landing</div>
+          <div class="value">
+            <span id="crashCount">—</span>
+            <span id="crashBadge" class="pill">recent list below</span>
+          </div>
+          <div id="crashMeta" class="muted">window: last 365 days</div>
+        </div>
       </div>
 
       <div id="error" class="err" style="margin-top:12px"></div>
-      <div class="footer">Uses <code>/flight-hours</code> and <code>/landings</code> API endpoints from your Flask app.</div>
+
+      <div class="list" id="alarmList">
+        <!-- recent events render here -->
+      </div>
+
+      <div class="footer">
+        Uses <code>/flight-hours</code>, <code>/landings</code>, <code>/crash-alarms</code>, and <code>/crash-alarms/count</code>.
+      </div>
     </div>
   </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
+    const base = ""; // same-origin; set like "/api" if you mount under a prefix
 
     function qs(params) {
       return Object.entries(params)
@@ -99,9 +125,39 @@
       return String(val);
     }
 
+    function sevClass(s){ return s === "critical" ? "critical" : (s === "warn" ? "warn" : "ok"); }
+
+    function renderAlarms(items) {
+      const el = $("alarmList");
+      el.innerHTML = "";
+      if (!items || !items.length) {
+        el.innerHTML = `<div class="item"><div class="muted">No crash/hard-landing events in window.</div></div>`;
+        return;
+      }
+      items.slice(0, 25).forEach(it => {
+        const time = it.time || "";
+        const event = it.event || "alarm";
+        const sev = it.severity || "warn";
+        const vdown = it.v_down != null ? `v↓ ${Number(it.v_down).toFixed(2)} m/s` : "";
+        const vh    = it.v_h_pre != null ? `vₕ ${Number(it.v_h_pre).toFixed(2)} m/s` : "";
+        const g     = it.g != null ? `${Number(it.g).toFixed(1)} g` : "";
+        const meta  = [vdown, vh, g].filter(Boolean).join("  ·  ");
+
+        const div = document.createElement("div");
+        div.className = "item";
+        div.innerHTML = `
+          <div class="muted">${time}</div>
+          <div><span class="sev ${sevClass(sev)}">${event.replace("_"," ")}</span></div>
+          <div class="kv">${meta}</div>
+        `;
+        el.appendChild(div);
+      });
+    }
+
     async function loadStats() {
       $("error").textContent = "";
       $("status").textContent = "Loading…";
+
       const droneId = $("droneId").value.trim();
       const unit = $("unit").value;
       const start = $("start").value.trim();
@@ -113,17 +169,30 @@
         return;
       }
 
-      const base = ""; // same origin
-      const q = { drone_id: droneId, unit, start, end };
-      const fhURL = `${base}/flight-hours?${qs(q)}`;
-      const ldURL = `${base}/landings?${qs({ drone_id: droneId, start, end })}`;
+      const qBase = { start, end };
+      const fhURL = `${base}/flight-hours?${qs({ ...qBase, drone_id: droneId, unit })}`;
+      const ldURL = `${base}/landings?${qs({ ...qBase, drone_id: droneId })}`;
+      const caCntURL = `${base}/crash-alarms/count?${qs({ ...qBase, drone_id: droneId })}`;
+      const caListURL = `${base}/crash-alarms?${qs({ ...qBase, drone_id: droneId })}`;
 
       try {
-        const [fh, ld] = await Promise.all([fetchJSON(fhURL), fetchJSON(ldURL)]);
+        const [fh, ld, caCnt, caList] = await Promise.all([
+          fetchJSON(fhURL),
+          fetchJSON(ldURL),
+          fetchJSON(caCntURL),
+          fetchJSON(caListURL),
+        ]);
+
         $("fhValue").textContent = fmt(fh.value, unit);
         $("fhMeta").textContent = `window: ${fh.start} → ${fh.end}`;
+
         $("landValue").textContent = (ld.landings ?? "—");
         $("landMeta").textContent = `window: ${ld.start} → ${ld.end}`;
+
+        $("crashCount").textContent = (caCnt.count ?? "—");
+        $("crashMeta").textContent = `window: ${caList.start || fh.start} → ${caList.end || fh.end}`;
+        renderAlarms(caList.items);
+
         $("status").textContent = "Updated";
       } catch (e) {
         $("error").textContent = `Failed to load stats: ${e.message}`;
@@ -133,13 +202,12 @@
 
     $("loadBtn").addEventListener("click", loadStats);
     $("resetBtn").addEventListener("click", () => {
-      $("droneId").value = "";
-      $("start").value = "";
-      $("end").value = "";
-      $("fhValue").textContent = "—";
-      $("landValue").textContent = "—";
+      ["droneId","start","end"].forEach(id => $(id).value = "");
+      ["fhValue","landValue","crashCount"].forEach(id => $(id).textContent = "—");
       $("fhMeta").textContent = "window: last 365 days";
       $("landMeta").textContent = "window: last 365 days";
+      $("crashMeta").textContent = "window: last 365 days";
+      $("alarmList").innerHTML = "";
       $("status").textContent = "";
       $("error").textContent = "";
     });

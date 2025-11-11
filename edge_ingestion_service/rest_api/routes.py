@@ -304,6 +304,72 @@ def register_routes(app,publisher):
         except Exception as e:
             logging.exception("landings endpoint failed")
             return jsonify({"error": f"Failed to query landings: {e}"}), 500
+        
+
+    @app.route("/crash-alarms")
+    def crash_alarms():
+        drone_id = request.args.get("drone_id")
+        start = request.args.get("start")
+        end = request.args.get("end")
+        if not drone_id:
+            return jsonify({"error":"drone_id is required"}), 400
+
+        now = datetime.now(timezone.utc)
+        end_dt = datetime.fromisoformat(end.replace("Z","+00:00")) if end else now
+        start_dt = datetime.fromisoformat(start.replace("Z","+00:00")) if start else (end_dt - timedelta(days=30))
+
+        q = f'''
+    from(bucket: "{BUCKET}")
+    |> range(start: {start_dt.isoformat()}, stop: {end_dt.isoformat()})
+    |> filter(fn: (r) => r._measurement == "flight_alarms")
+    |> filter(fn: (r) => r.drone_id == "{drone_id}")
+    |> filter(fn: (r) => r.event == "crash" or r.event == "hard_landing")
+    '''
+        df = _qapi.query_data_frame(q)
+        if isinstance(df, list) and df: df = pd.concat(df, ignore_index=True)
+        if df is None or df.empty:
+            return jsonify({"drone_id":drone_id,"items":[]})
+
+        # Return simple list
+        items = []
+        for _, row in df.iterrows():
+            items.append({
+                "time": str(row.get("_time")),
+                "event": row.get("event"),
+                "severity": row.get("severity"),
+                "v_down": row.get("v_down"),
+                "v_h_pre": row.get("v_h_pre"),
+                "g": row.get("g")
+            })
+        return jsonify({"drone_id":drone_id, "items": items})
+
+    @app.route("/crash-alarms/count")
+    def crash_alarms_count():
+        drone_id = request.args.get("drone_id")
+        start = request.args.get("start")
+        end = request.args.get("end")
+        if not drone_id: return jsonify({"error":"drone_id is required"}), 400
+
+        now = datetime.now(timezone.utc)
+        end_dt = datetime.fromisoformat(end.replace("Z","+00:00")) if end else now
+        start_dt = datetime.fromisoformat(start.replace("Z","+00:00")) if start else (end_dt - timedelta(days=365))
+
+        q = f'''
+    from(bucket: "{BUCKET}")
+    |> range(start: {start_dt.isoformat()}, stop: {end_dt.isoformat()})
+    |> filter(fn: (r) => r._measurement == "flight_alarms")
+    |> filter(fn: (r) => r.drone_id == "{drone_id}")
+    |> group(columns: [])
+    |> count(column: "_value")
+    '''
+        df = _qapi.query_data_frame(q)
+        total = 0
+        if isinstance(df, list) and df: df = pd.concat(df, ignore_index=True)
+        if df is not None and not df.empty:
+            # count of alarm rows
+            try: total = int(df["_value"].sum())
+            except: total = 0
+        return jsonify({"drone_id":drone_id, "count": total})        
 
     @app.route("/stats.html")
     def stats_page():
