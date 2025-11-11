@@ -40,6 +40,21 @@ class InfluxWriter:
         except Exception as e:
             logging.error(f"❌ Failed to write to InfluxDB: {e}")
 
+    def write_landing_event(self, drone_id: str, ts: datetime):
+        """Write one landing event: measurement=flight_events, field=landings=1"""
+        try:
+            p = (
+                Point("flight_events")
+                .tag("drone_id", drone_id)
+                .tag("event", "landing")
+                .field("landings", 1)
+                .time(ts, WritePrecision.NS)
+            )
+            self.write_api.write(bucket=self.bucket, org=self.org, record=p)
+            logging.debug(f"📤 Landing event written for {drone_id} at {ts.isoformat()}")
+        except Exception as e:
+            logging.error(f"❌ Failed to write landing event: {e}")
+
     def close(self):
         self.client.close()
         logging.info("✅ InfluxDB disconnected")

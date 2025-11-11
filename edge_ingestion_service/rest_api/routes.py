@@ -3,11 +3,73 @@ from utils.logger import setup_logger
 from flask_cors import CORS
 import os
 import json
-
+from datetime import datetime, timedelta, timezone
+import pandas as pd
+from influxdb_client import InfluxDBClient
+import platform
 
 logging = setup_logger(__name__)
 
 result = []
+
+if platform.system() == "Windows":  # 2dl read from config
+    INFLUX_URL = "http://localhost:8086"
+else:
+    INFLUX_URL = "http://host.docker.internal:8086"
+INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "UGFYphuRbH-x-KTWrHfiQNbNSH2Wg1R9KPHkp0Ga8WRlbkGTMB2-w2-e8J9xKDMQgotVdhLEHVr82Ll9W7VXvw==")  # avoid committing this
+INFLUX_ORG   = os.getenv("INFLUX_ORG", "5ea549634c8f37ac")
+
+BUCKET       = os.getenv("OUT_BUCKET",   os.getenv("IN_BUCKET", "drone_telemetry"))
+MEAS_SUMMARY = os.getenv("MEAS_SUMMARY", "flight_hours")
+DRONE_TAG    = os.getenv("DRONE_TAG",    "drone_id")
+
+_influx_client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+_qapi = _influx_client.query_api()
+
+def _iso(dt: datetime) -> str:
+    return dt.replace(microsecond=0).isoformat().replace("+00:00","Z")
+
+def _flux_sum_hours(drone_id: str, start_iso: str, end_iso: str) -> float:
+    q = f'''
+from(bucket: "{BUCKET}")
+  |> range(start: {start_iso}, stop: {end_iso})
+  |> filter(fn: (r) => r._measurement == "{MEAS_SUMMARY}")
+  |> filter(fn: (r) => r._field == "hours" and r.{DRONE_TAG} == "{drone_id}")
+  |> drop(columns: ["window_start","window_end"])
+  |> group(columns: [])
+  |> sum()
+'''
+    df = _qapi.query_data_frame(q)
+    if isinstance(df, list) and df:
+        df = pd.concat(df, ignore_index=True)
+    if df is None or df.empty:
+        return 0.0
+    try:
+        return float(df["_value"].iloc[0])
+    except Exception:
+        return 0.0
+    
+def _flux_sum_landings(drone_id: str, start_iso: str, end_iso: str) -> int:
+    q = f'''
+from(bucket: "{BUCKET}")
+  |> range(start: {start_iso}, stop: {end_iso})
+  |> filter(fn: (r) => r._measurement == "flight_events")
+  |> filter(fn: (r) => r._field == "landings" and r.drone_id == "{drone_id}")
+  |> group(columns: [])
+  |> sum()
+'''
+    df = _qapi.query_data_frame(q)
+    if isinstance(df, list) and df:
+        df = pd.concat(df, ignore_index=True)
+    if df is None or df.empty:
+        return 0
+    try:
+        # _value is the sum of 1-per-landing
+        return int(float(df["_value"].iloc[0]))
+    except Exception:
+        return 0
+
+
 
 #STATIC_FOLDER = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../static"))
 
@@ -174,3 +236,71 @@ def register_routes(app,publisher):
         #     'alt': drone_location['alt'],
         #     'heading': drone_location['heading'],
         # })
+
+
+    # GET /flight-hours?drone_id=123456789 → total hours (last 365 days)
+    # GET /flight-hours?drone_id=123456789&unit=seconds
+    # GET /flight-hours?drone_id=123456789&start=2025-11-01T00:00:00Z&end=2025-11-07T00:00:00Z
+    @app.route("/flight-hours")
+    def flight_hours():
+        drone_id = request.args.get("drone_id")
+        unit = request.args.get("unit", "hours").lower()   # "hours" | "seconds"
+        start = request.args.get("start")  # optional ISO, e.g. 2025-11-01T00:00:00Z
+        end   = request.args.get("end")    # optional ISO
+
+        if not drone_id:
+            return jsonify({"error": "drone_id is required"}), 400
+        if unit not in ("hours", "seconds"):
+            return jsonify({"error": "unit must be 'hours' or 'seconds'"}), 400
+
+        now = datetime.now(timezone.utc)
+        end_dt = datetime.fromisoformat(end.replace("Z","+00:00")) if end else now
+        start_dt = datetime.fromisoformat(start.replace("Z","+00:00")) if start else (end_dt - timedelta(days=365))
+
+        start_iso = _iso(start_dt)
+        end_iso   = _iso(end_dt)
+
+        try:
+            total_hours = _flux_sum_hours(drone_id, start_iso, end_iso)
+            value = total_hours if unit == "hours" else round(total_hours * 3600.0, 6)
+            return jsonify({
+                "drone_id": drone_id,
+                "start": start_iso,
+                "end": end_iso,
+                "unit": unit,
+                "value": value
+            })
+        except Exception as e:
+            logging.exception("flight-hours endpoint failed")
+            return jsonify({"error": f"Failed to query flight hours: {e}"}), 500
+
+
+    # GET /landings?drone_id=123456789 → last 365 days total
+    # GET /landings?drone_id=123456789&start=2025-11-01T00:00:00Z&end=2025-11-07T00:00:00Z
+    @app.route("/landings")
+    def landings():
+        drone_id = request.args.get("drone_id")
+        start = request.args.get("start")  # optional ISO, default last 365d
+        end   = request.args.get("end")
+
+        if not drone_id:
+            return jsonify({"error": "drone_id is required"}), 400
+
+        now = datetime.now(timezone.utc)
+        end_dt = datetime.fromisoformat(end.replace("Z","+00:00")) if end else now
+        start_dt = datetime.fromisoformat(start.replace("Z","+00:00")) if start else (end_dt - timedelta(days=365))
+
+        start_iso = _iso(start_dt)
+        end_iso   = _iso(end_dt)
+
+        try:
+            count = _flux_sum_landings(drone_id, start_iso, end_iso)
+            return jsonify({
+                "drone_id": drone_id,
+                "start": start_iso,
+                "end": end_iso,
+                "landings": count
+            })
+        except Exception as e:
+            logging.exception("landings endpoint failed")
+            return jsonify({"error": f"Failed to query landings: {e}"}), 500

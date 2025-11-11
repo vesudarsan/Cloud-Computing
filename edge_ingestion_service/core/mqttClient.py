@@ -314,6 +314,7 @@ class MQTTClient:
                             if (end_p - start_p).total_seconds() > (dur + 2*PAD_SEC + MAX_CLOCK_SKEW_SEC):
                                 logging.warning(f"[{drone_id}] large clock skew detected on landing window.")
                             logging.info(f"[{drone_id}] LANDED at { _iso(ts) } — duration {dur:.1f}s → compute")
+                            self.influx_writer.write_landing_event(drone_id=drone_id, ts=ts) 
                             self._trigger_compute_async(drone_id, start_p, end_p)
                         else:
                             logging.info(f"[{drone_id}] landed but short flight ignored ({dur:.1f}s)")
