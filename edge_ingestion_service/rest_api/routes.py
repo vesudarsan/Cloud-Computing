@@ -26,6 +26,28 @@ DRONE_TAG    = os.getenv("DRONE_TAG",    "drone_id")
 _influx_client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
 _qapi = _influx_client.query_api()
 
+
+def try_parse_json(s):
+    if s is None:
+        return None
+    if isinstance(s, (dict, list)):
+        return s
+    try:
+        return json.loads(s)
+    except Exception:
+        return s
+
+def try_parse_number(v):
+    try:
+        if v is None:
+            return None
+        return float(v)
+    except Exception:
+        try:
+            return float(str(v))
+        except Exception:
+            return None
+
 def _iso(dt: datetime) -> str:
     return dt.replace(microsecond=0).isoformat().replace("+00:00","Z")
 
@@ -150,12 +172,7 @@ def register_routes(app,publisher):
     def health():
         return jsonify({"status": "ok"})
 
-    @app.route("/control.html") # 2dl update later
-    def serve_page():
-        return send_from_directory("static", "control.html")
-
-  
-     
+      
     @app.post("/publish")
     def publish_message():
         data = request.get_json()
@@ -425,15 +442,160 @@ def register_routes(app,publisher):
         except Exception as e:
             logging.exception("online-devices endpoint failed")
             return jsonify({"error": str(e)}), 500
+  
 
 
-    @app.get("/online-devices-fast")
+
+    @app.route("/online-devices-fast")
     def online_devices_fast():
         use_cache = request.args.get("cache", "1") == "1"
         if use_cache and hasattr(publisher, "_online_devices"):
             devices = [{"drone_id": d, "last_seen": None} for d in sorted(publisher._online_devices)]
             return jsonify({"count": len(devices), "devices": devices})
         return online_devices()
+    
+
+
+    @app.route("/nbirth")
+    def get_nbirth_by_drone():
+        """
+        GET /nbirth?drone_id=123456789
+        Prefer in-memory publisher.client.online_devices; fall back to InfluxDB 'device_birth'.
+        """
+        drone_id = request.args.get("drone_id")
+        if not drone_id:
+            return jsonify({"error": "missing drone_id query parameter"}), 400
+
+        # 1) Try in-memory online_devices (fast path)
+        try:
+            # publisher should be available in the closure of register_routes
+            mqtt_client = getattr(publisher, "client", None) or getattr(publisher, "mqtt_client", None)
+            online = None
+            if mqtt_client is not None:
+                online_devices = getattr(mqtt_client, "online_devices", None)
+                if isinstance(online_devices, dict):
+                    rec = online_devices.get(drone_id)
+                    if rec:
+                        # return friendly response built from in-memory record
+                        payload = rec.get("payload") or {}
+                        last_seen = rec.get("last_seen") or payload.get("start_time") or datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
+                        resp = {
+                            "found": True,
+                            "source": "memory",
+                            "drone_id": drone_id,
+                            "last_seen": last_seen,
+                            "hostname": payload.get("system", {}).get("hostname"),
+                            "ip_address": payload.get("system", {}).get("ip_address"),
+                            "uptime_seconds": try_parse_number(payload.get("system", {}).get("uptime_seconds")),
+                            "cpu_percent": try_parse_number(payload.get("system", {}).get("cpu_percent")),
+                            "mem_total_mb": try_parse_number((payload.get("system", {}) or {}).get("memory", {}).get("total_mb")),
+                            "mem_used_mb": try_parse_number((payload.get("system", {}) or {}).get("memory", {}).get("used_mb")),
+                            "mem_percent": try_parse_number((payload.get("system", {}) or {}).get("memory", {}).get("percent")),
+                            "deployments": payload.get("deployments")  # already structured if stored from NBIRTH
+                        }
+                        return jsonify(resp), 200
+        except Exception as e:
+            logging.warning(f"Error checking in-memory online_devices: {e}")
+            # fall back to DB
+
+        # 2) Fallback to InfluxDB (persistent)
+        try:
+            client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+            qapi = client.query_api()
+
+            # Query latest device_birth records for this drone_id
+            # Using last() will return the last point per field; range uses a long window to be safe
+            flux_q = f'''
+    from(bucket: "{BUCKET}")
+    |> range(start: -3650d)
+    |> filter(fn: (r) => r._measurement == "device_birth")
+    |> filter(fn: (r) => r.drone_id == "{drone_id}")
+    |> last()
+    '''
+            df = qapi.query_data_frame(flux_q)
+
+            if isinstance(df, list):
+                df = pd.concat(df, ignore_index=True) if df else pd.DataFrame()
+
+            if df is None or df.empty:
+                client.close()
+                return jsonify({"found": False, "drone_id": drone_id}), 200
+
+            # pivot so each _field becomes a column (one row)
+            try:
+                pivot = df.pivot_table(index=['drone_id', '_time'], columns='_field', values='_value', aggfunc='first').reset_index()
+                pivot['_time'] = pd.to_datetime(pivot['_time'], utc=True)
+                latest = pivot.loc[pivot['_time'].idxmax()]
+                last_seen = latest['_time'].to_pydatetime().astimezone(timezone.utc).isoformat().replace("+00:00","Z")
+
+                out = {
+                    "found": True,
+                    "source": "influx",
+                    "drone_id": str(latest.get('drone_id')),
+                    "last_seen": last_seen
+                }
+
+                # map of expected fields -> output key
+                field_map = {
+                    'hostname': 'hostname',
+                    'ip_address': 'ip_address',
+                    'uptime_seconds': 'uptime_seconds',
+                    'cpu_percent': 'cpu_percent',
+                    'mem_total_mb': 'mem_total_mb',
+                    'mem_used_mb': 'mem_used_mb',
+                    'mem_percent': 'mem_percent',
+                    'deployments_json': 'deployments'
+                }
+
+                for col, outkey in field_map.items():
+                    if col in latest.index and pd.notna(latest.get(col)):
+                        val = latest.get(col)
+                        if col == 'deployments_json':
+                            out[outkey] = try_parse_json(val)
+                        else:
+                            out[outkey] = try_parse_number(val) if isinstance(val, (int, float, str)) else val
+
+                client.close()
+                return jsonify(out), 200
+
+            except Exception as ex_pivot:
+                # fallback to manual row scan if pivot fails
+                logging.warning(f"Pivot failed for NBIRTH query: {ex_pivot}; trying manual aggregation")
+                df['_time'] = pd.to_datetime(df['_time'], utc=True)
+                df = df.sort_values('_time', ascending=False)
+                # find latest timestamp row for each field (we'll assemble a dict)
+                result = {"found": True, "source": "influx", "drone_id": drone_id}
+                # take the newest timestamp overall as last_seen
+                last_ts = df.iloc[0]['_time']
+                result['last_seen'] = pd.to_datetime(last_ts, utc=True).astimezone(timezone.utc).isoformat().replace("+00:00","Z")
+
+                # collect values by field taking the first (which is the latest due to sort)
+                field_vals = {}
+                for _, row in df.iterrows():
+                    fld = row.get('_field')
+                    if fld and fld not in field_vals:
+                        field_vals[fld] = row.get('_value')
+
+                # map common fields back into result
+                if 'hostname' in field_vals: result['hostname'] = field_vals['hostname']
+                if 'ip_address' in field_vals: result['ip_address'] = field_vals['ip_address']
+                if 'uptime_seconds' in field_vals: result['uptime_seconds'] = try_parse_number(field_vals['uptime_seconds'])
+                if 'cpu_percent' in field_vals: result['cpu_percent'] = try_parse_number(field_vals['cpu_percent'])
+                if 'mem_total_mb' in field_vals: result['mem_total_mb'] = try_parse_number(field_vals['mem_total_mb'])
+                if 'mem_used_mb' in field_vals: result['mem_used_mb'] = try_parse_number(field_vals['mem_used_mb'])
+                if 'mem_percent' in field_vals: result['mem_percent'] = try_parse_number(field_vals['mem_percent'])
+                if 'deployments_json' in field_vals: result['deployments'] = try_parse_json(field_vals['deployments_json'])
+
+                client.close()
+                return jsonify(result), 200
+
+        except Exception as e:
+            logging.exception(f"Failed to query NBIRTH for {drone_id}: {e}")
+            try:
+                client.close()
+            except:
+                pass
+            return jsonify({"error": "internal error"}), 500    
 
 
 

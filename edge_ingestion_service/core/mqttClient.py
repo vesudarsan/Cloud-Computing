@@ -71,7 +71,7 @@ class MQTTClient:
         self._buf = {}  # {drone_id: deque of samples (ts, alt_m, v_h, v_vert)}
         self._imu = {}  # {drone_id: last accel magnitude, g}
         self._buf_len_sec = float(os.getenv("CRASH_BUF_SEC", "3.0"))
-        self._online_devices = set()   # in-memory cache (optional fast read)
+        self.online_devices = {}   # drone_id -> {"last_seen": iso, "payload": {...}}
 
     ## Code for buffering and impact detection , used to detect impacts like crashes and hard landings
     def _buf_get(self, drone_id):
@@ -216,6 +216,7 @@ class MQTTClient:
         try:
             logging.debug(f"📩 Received message on {msg.topic}: {msg.payload.decode('utf-8')}")
             topic = msg.topic
+            payload = json.loads(msg.payload.decode())
             if "NBIRTH" in topic or "NDEATH" in topic:
                 droneId = topic.split("/")[-1]
             else:
@@ -231,22 +232,39 @@ class MQTTClient:
                 # device online
                 try:
                     # write to Influx
-                    self.influx_writer.write_device_state(drone_id=droneId, online=True)
-                    # update in-memory cache
-                    self._online_devices.add(str(droneId))
-                    logging.info(f"[{droneId}] NBIRTH processed → marked online")
+                    self.influx_writer.write_device_state(drone_id=droneId, online=True)                    
                 except Exception:
                     logging.exception(f"[{droneId}] failed processing NBIRTH")
+
+                try:
+                    self.influx_writer.write_device_birth(payload, droneId)
+                except Exception as e:
+                    logging.error(f"Failed writing NBIRTH to Influx: {e}") 
+
+                # update in-memory online devices map
+                self.online_devices[droneId] = {
+                    "drone_id": droneId,
+                    "last_seen": datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),
+                    "payload": payload
+                }
+                logging.info(f"[{droneId}] NBIRTH processed, marked online")                   
 
             elif "NDEATH" in topic:
                 # device offline
                 try:
-                    self.influx_writer.write_device_state(drone_id=droneId, online=False)
-                    # update in-memory cache
-                    self._online_devices.discard(str(droneId))
-                    logging.info(f"[{droneId}] NDEATH processed → marked offline")
+                    self.influx_writer.write_device_state(drone_id=droneId, online=False)                    
+                   
                 except Exception:
-                    logging.exception(f"[{droneId}] failed processing NDEATH")                    
+                    logging.exception(f"[{droneId}] failed processing NDEATH")   
+
+                try:
+                    self.influx_writer.write_device_death(payload, droneId)
+                except Exception as e:
+                    logging.error(f"Failed writing NDEATH to Influx: {e}")
+
+                # remove from online map (but keep a last_seen field if desired)
+                prev = self.online_devices.pop(droneId, None)
+                logging.info(f"[{droneId}] NDEATH processed, removed from online list")                 
 
             
             elif "Mavlink" in topic:

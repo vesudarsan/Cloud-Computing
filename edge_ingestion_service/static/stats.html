@@ -30,13 +30,28 @@
     .item{display:grid;grid-template-columns:140px 110px 1fr;gap:10px;padding:10px 0;border-bottom:1px dashed #223064;align-items:center}
     .kv{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; color:#cfd5e6}
     .pill{display:inline-block;padding:2px 6px;border-radius:8px;border:1px solid #2a3a74;background:#0c1430;color:#9fb2ff;font-size:11px;margin-left:6px}
-    .devices{max-height:320px;overflow:auto;padding-top:8px}
+    .devices{max-height:280px;overflow:auto;padding-top:8px}
     .dev-item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed #1f2b50}
     .dev-left{display:flex;flex-direction:column}
     .dev-id{font-weight:600}
     .small{font-size:12px;color:var(--muted)}
     .controls{display:flex;gap:8px;align-items:center}
     .age{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color:#cfd5e6; font-size:12px}
+
+    /* NBIRTH panel */
+    .nbirth { margin-top:12px; border-radius:10px; padding:0; border:1px solid #243366; background:#07102a; overflow:hidden; }
+    .nbirth-header { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 12px; position:sticky; top:0; background:#07102a; z-index:5; border-bottom:1px solid #12203a; }
+    .nbirth-body { padding:12px; max-height:320px; overflow-y:auto; }
+    .nbirth-body .muted { color:var(--muted); }
+    .nbirth pre { white-space:pre-wrap; font-family: ui-monospace, Menlo, Consolas, monospace; font-size:12px; color:#cfe1ff; margin:6px 0 0; background:transparent; border:0; }
+
+    /* nice scrollbar for NBIRTH panel */
+    .nbirth-body::-webkit-scrollbar { width:8px; }
+    .nbirth-body::-webkit-scrollbar-thumb { background-color:#2e3e6f; border-radius:6px; }
+    .nbirth-body:hover::-webkit-scrollbar-thumb { background-color:#4d66b8; }
+
+    .toggle-mini { padding:6px 10px; border-radius:8px; font-size:12px; background:#0f1730; border:1px solid #243366; cursor:pointer; color:var(--muted) }
+    .toggle-mini:hover { color:var(--text) }
   </style>
 </head>
 <body>
@@ -106,12 +121,32 @@
       </div>
 
       <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-top:18px">
-        <div class="card" style="padding:12px;">
-          <div style="display:flex;justify-content:space-between;align-items:center">
+        <div class="card" style="padding:0;">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:12px">
             <div style="font-weight:700">Recent Crash / Hard-Landing Events</div>
             <div class="small">showing latest 25</div>
           </div>
-          <div id="alarmList" class="list" style="margin-top:10px"></div>
+
+          <div id="alarmList" class="list" style="margin-top:0;padding:12px"></div>
+
+          <!-- NBIRTH info panel (scrollable) -->
+          <div id="nbirthPanel" class="nbirth" aria-live="polite">
+            <div class="nbirth-header">
+              <div style="display:flex;align-items:center;gap:12px">
+                <div style="font-weight:700">Device Info (NBIRTH)</div>
+                <div id="nbirthSource" class="small muted">—</div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <button id="nbirthToggleBtn" class="toggle-mini" type="button" aria-expanded="true">Collapse</button>
+              </div>
+            </div>
+
+            <div id="nbirthBody" class="nbirth-body">
+              <div id="nbirthSummary" class="small muted">No device selected. Click Load Stats for a drone.</div>
+              <pre id="nbirthRaw" style="display:none"></pre>
+            </div>
+          </div>
+
         </div>
 
         <div class="card" style="padding:12px;">
@@ -124,7 +159,7 @@
 
       <div id="error" class="err" style="margin-top:12px"></div>
       <div class="footer">
-        Uses <code>/flight-hours</code>, <code>/landings</code>, <code>/crash-alarms</code>, <code>/crash-alarms/count</code> and <code>/online-devices</code>.
+        Uses <code>/flight-hours</code>, <code>/landings</code>, <code>/crash-alarms</code>, <code>/crash-alarms/count</code>, <code>/nbirth</code> and <code>/online-devices</code>.
       </div>
     </div>
   </div>
@@ -223,10 +258,60 @@
       $("onlineMeta").textContent = `last refresh: ${new Date().toLocaleTimeString()}`;
     }
 
-    // data loaders
+    // NBIRTH display helper
+    function renderNBirth(resp) {
+      const body = $("nbirthSummary");
+      const raw = $("nbirthRaw");
+      const src = $("nbirthSource");
+      if (!resp || !resp.found) {
+        src.textContent = "—";
+        body.className = "small muted";
+        body.textContent = "No NBIRTH found for this drone.";
+        raw.style.display = "none";
+        return;
+      }
+
+      src.textContent = `source: ${resp.source || "unknown"}`;
+      const lines = [];
+      if (resp.hostname) lines.push(`hostname: ${resp.hostname}`);
+      if (resp.ip_address) lines.push(`ip: ${resp.ip_address}`);
+      if (resp.last_seen) lines.push(`last_seen: ${resp.last_seen}`);
+      if (resp.uptime_seconds != null) lines.push(`uptime_s: ${resp.uptime_seconds}`);
+      if (resp.cpu_percent != null) lines.push(`cpu%: ${resp.cpu_percent}`);
+      if (resp.mem_total_mb != null) lines.push(`mem_total_mb: ${resp.mem_total_mb}`);
+      if (resp.mem_used_mb != null) lines.push(`mem_used_mb: ${resp.mem_used_mb}`);
+      if (resp.mem_percent != null) lines.push(`mem%: ${resp.mem_percent}`);
+      if (resp.deployments) lines.push(`deployments: (${Array.isArray(resp.deployments) ? resp.deployments.length : "?"})`);
+
+      body.className = "small";
+      body.innerHTML = lines.length ? lines.map(l => `<div>${l}</div>`).join("") : "<div class='muted'>No structured NBIRTH fields available.</div>";
+
+      // show raw deployments JSON for convenience
+      if (resp.deployments) {
+        raw.style.display = "block";
+        raw.textContent = JSON.stringify(resp.deployments, null, 2);
+      } else {
+        raw.style.display = "none";
+      }
+    }
+
+    // Data loaders
+    async function loadNBirth(droneId) {
+      if (!droneId) return renderNBirth(null);
+      const url = `${base}/nbirth?${qs({ drone_id: droneId })}`;
+      try {
+        const resp = await fetchJSON(url);
+        renderNBirth(resp);
+      } catch (e) {
+        $("error").textContent = `Failed to load NBIRTH: ${e.message}`;
+        renderNBirth(null);
+      }
+    }
+
     async function loadStats() {
       $("error").textContent = "";
       $("status").textContent = "Loading…";
+
       const droneId = $("droneId").value.trim();
       const unit = $("unit").value;
       const start = $("start").value.trim();
@@ -239,22 +324,34 @@
       }
 
       const qBase = { start, end };
-      const fhURL = `${base}/flight-hours?${qs({...qBase, drone_id: droneId, unit})}`;
-      const ldURL = `${base}/landings?${qs({...qBase, drone_id: droneId})}`;
-      const caCntURL = `${base}/crash-alarms/count?${qs({...qBase, drone_id: droneId})}`;
-      const caListURL = `${base}/crash-alarms?${qs({...qBase, drone_id: droneId})}`;
+      const fhURL = `${base}/flight-hours?${qs({ ...qBase, drone_id: droneId, unit })}`;
+      const ldURL = `${base}/landings?${qs({ ...qBase, drone_id: droneId })}`;
+      const caCntURL = `${base}/crash-alarms/count?${qs({ ...qBase, drone_id: droneId })}`;
+      const caListURL = `${base}/crash-alarms?${qs({ ...qBase, drone_id: droneId })}`;
+      const nbURL = `${base}/nbirth?${qs({ drone_id: droneId })}`;
 
       try {
-        const [fh, ld, caCnt, caList] = await Promise.all([
-          fetchJSON(fhURL), fetchJSON(ldURL), fetchJSON(caCntURL), fetchJSON(caListURL)
+        const [fh, ld, caCnt, caList, nb] = await Promise.all([
+          fetchJSON(fhURL),
+          fetchJSON(ldURL),
+          fetchJSON(caCntURL),
+          fetchJSON(caListURL),
+          fetchJSON(nbURL)
         ]);
+
         $("fhValue").textContent = fmt(fh.value, unit);
         $("fhMeta").textContent = `window: ${fh.start} → ${fh.end}`;
+
         $("landValue").textContent = (ld.landings ?? "—");
         $("landMeta").textContent = `window: ${ld.start} → ${ld.end}`;
+
         $("crashCount").textContent = (caCnt.count ?? "—");
         $("crashMeta").textContent = `window: ${caList.start || fh.start} → ${caList.end || fh.end}`;
         renderAlarms(caList.items);
+
+        // render NBIRTH directly
+        renderNBirth(nb);
+
         $("status").textContent = "Updated";
       } catch (e) {
         $("error").textContent = `Failed to load stats: ${e.message}`;
@@ -286,10 +383,29 @@
         $("devices").innerHTML = `<div class="muted">No data yet. Click 'Refresh Devices' or load stats.</div>`;
         $("status").textContent = "";
         $("error").textContent = "";
+        renderNBirth(null);
       });
       $("refreshDevicesBtn").addEventListener("click", loadDevices);
 
-      // auto-refresh
+      // NBIRTH collapse/expand toggle
+      const nbToggle = $("nbirthToggleBtn");
+      const nbBody = $("nbirthBody");
+      nbToggle.addEventListener("click", () => {
+        const expanded = nbToggle.getAttribute("aria-expanded") === "true";
+        if (expanded) {
+          // collapse
+          nbBody.style.display = "none";
+          nbToggle.textContent = "Expand";
+          nbToggle.setAttribute("aria-expanded", "false");
+        } else {
+          // expand
+          nbBody.style.display = "";
+          nbToggle.textContent = "Collapse";
+          nbToggle.setAttribute("aria-expanded", "true");
+        }
+      });
+
+      // auto-refresh devices every 20s
       let devicesInterval = null;
       function startAuto() {
         if (devicesInterval) clearInterval(devicesInterval);
@@ -297,6 +413,8 @@
         devicesInterval = setInterval(loadDevices, 20*1000);
       }
       startAuto();
+      // initial NBIRTH panel empty
+      renderNBirth(null);
     });
   </script>
 </body>
