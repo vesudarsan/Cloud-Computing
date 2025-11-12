@@ -71,6 +71,7 @@ class MQTTClient:
         self._buf = {}  # {drone_id: deque of samples (ts, alt_m, v_h, v_vert)}
         self._imu = {}  # {drone_id: last accel magnitude, g}
         self._buf_len_sec = float(os.getenv("CRASH_BUF_SEC", "3.0"))
+        self._online_devices = set()   # in-memory cache (optional fast read)
 
     ## Code for buffering and impact detection , used to detect impacts like crashes and hard landings
     def _buf_get(self, drone_id):
@@ -179,8 +180,12 @@ class MQTTClient:
             return
 
         topics = [
-            f"{self.sparkplug_namespace}/{self.sp_group_id}/NBIRTH/{self.sp_edge_id}/#",
-            f"{self.sparkplug_namespace}/{self.sp_group_id}/DDATA/{self.sp_edge_id}/Mavlink"
+            # f"{self.sparkplug_namespace}/{self.sp_group_id}/NBIRTH/{self.sp_edge_id}",
+            # f"{self.sparkplug_namespace}/{self.sp_group_id}/NDEATH/{self.sp_edge_id}",
+            # f"{self.sparkplug_namespace}/{self.sp_group_id}/DDATA/{self.sp_edge_id}/Mavlink"
+            f"{self.sparkplug_namespace}/{self.sp_group_id}/NBIRTH/+",
+            f"{self.sparkplug_namespace}/{self.sp_group_id}/NDEATH/+",
+            f"{self.sparkplug_namespace}/{self.sp_group_id}/DDATA/+/Mavlink"
         ]
         for t in topics:
             try:
@@ -211,10 +216,42 @@ class MQTTClient:
         try:
             logging.debug(f"📩 Received message on {msg.topic}: {msg.payload.decode('utf-8')}")
             topic = msg.topic
-            droneId = topic.split("/")[-2]
+            if "NBIRTH" in topic or "NDEATH" in topic:
+                droneId = topic.split("/")[-1]
+            else:
+                droneId = topic.split("/")[-2]          
 
-            message_type = None
-            if topic.endswith("/Mavlink"):
+
+            # detect NBIRTH/NDEATH from topic (example topics):
+            # spBv1.0/DumsDroneFleet/NBIRTH/123456789
+            # spBv1.0/DumsDroneFleet/NDEATH/123456789
+   
+            # Better safe: check for "NBIRTH" / "NDEATH" anywhere in topic
+            if "NBIRTH" in topic:
+                # device online
+                try:
+                    # write to Influx
+                    self.influx_writer.write_device_state(drone_id=droneId, online=True)
+                    # update in-memory cache
+                    self._online_devices.add(str(droneId))
+                    logging.info(f"[{droneId}] NBIRTH processed → marked online")
+                except Exception:
+                    logging.exception(f"[{droneId}] failed processing NBIRTH")
+
+            elif "NDEATH" in topic:
+                # device offline
+                try:
+                    self.influx_writer.write_device_state(drone_id=droneId, online=False)
+                    # update in-memory cache
+                    self._online_devices.discard(str(droneId))
+                    logging.info(f"[{droneId}] NDEATH processed → marked offline")
+                except Exception:
+                    logging.exception(f"[{droneId}] failed processing NDEATH")                    
+
+            
+            elif "Mavlink" in topic:
+            # if topic.endswith("/Mavlink"):
+                message_type = None
                 payload = json.loads(msg.payload.decode())
                 message_type = payload.get("messageType")
                 # write to Influx

@@ -69,6 +69,44 @@ from(bucket: "{BUCKET}")
     except Exception:
         return 0
 
+def _flux_online_devices(ttl_seconds: int = 900):
+    """
+    Query InfluxDB for latest device_state per drone and return those
+    whose last state is online==1 *and* the last timestamp is within ttl_seconds.
+    """
+    # window must cover recent history (we'll pick ttl_seconds or a bit more)
+    start_iso = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()  # broad range
+    q = f'''
+from(bucket: "{BUCKET}")
+|> range(start: -7d)
+|> filter(fn: (r) => r._measurement == "device_state")
+|> drop(columns: [])
+|> group(columns: ["drone_id"])
+|> last()
+|> filter(fn: (r) => r._field == "online")
+'''
+    df = _qapi.query_data_frame(q)
+    if isinstance(df, list) and df:
+        df = pd.concat(df, ignore_index=True)
+
+    results = []
+    if df is None or df.empty:
+        return results
+
+    now = datetime.now(timezone.utc)
+    for _, row in df.iterrows():
+        try:
+            drone_id = row.get("drone_id") or row.get("droneId") or row.get("_measurement")
+            val = float(row.get("_value", 0))
+            ts = row.get("_time")
+            if isinstance(ts, str):
+                ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            # TTL check
+            if val == 1 and (now - ts).total_seconds() <= ttl_seconds:
+                results.append({"drone_id": str(drone_id), "last_seen": _iso(ts)})
+        except Exception:
+            continue
+    return results
 
 
 #STATIC_FOLDER = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../static"))
@@ -369,7 +407,35 @@ def register_routes(app,publisher):
             # count of alarm rows
             try: total = int(df["_value"].sum())
             except: total = 0
-        return jsonify({"drone_id":drone_id, "count": total})        
+        return jsonify({"drone_id":drone_id, "count": total})     
+
+ 
+    # GET /online-devices → returns JSON { "count": N, "devices":[{"drone_id":"123", "last_seen":"..."}...] }
+    # GET /online-devices?ttl=600 → consider devices offline if last seen older than 600 seconds.
+    @app.route("/online-devices")
+    def online_devices():
+        """
+        Query and return currently online drone ids.
+        optional query param: ttl (seconds) to consider a device stale (default 900s)
+        """
+        ttl = request.args.get("ttl", default=900, type=int)
+        try:
+            devices = _flux_online_devices(ttl_seconds=ttl)
+            return jsonify({"count": len(devices), "devices": devices})
+        except Exception as e:
+            logging.exception("online-devices endpoint failed")
+            return jsonify({"error": str(e)}), 500
+
+
+    @app.get("/online-devices-fast")
+    def online_devices_fast():
+        use_cache = request.args.get("cache", "1") == "1"
+        if use_cache and hasattr(publisher, "_online_devices"):
+            devices = [{"drone_id": d, "last_seen": None} for d in sorted(publisher._online_devices)]
+            return jsonify({"count": len(devices), "devices": devices})
+        return online_devices()
+
+
 
     @app.route("/stats.html")
     def stats_page():

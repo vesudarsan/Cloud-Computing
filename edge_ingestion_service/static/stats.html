@@ -2,23 +2,23 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Drone Flight Stats</title>
+  <title>Drone Flight Stats & Devices</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root { --bg:#0b1020; --card:#121a33; --text:#e9ecf1; --muted:#9aa4b2; --accent:#6ea8fe; --ok:#3ecf8e; --warn:#f6c64b; --crit:#ff5f5f; }
     *{box-sizing:border-box}
     body{margin:0;background:linear-gradient(180deg,#0a0f1f,#0d1530);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,Arial}
-    .wrap{max-width:1000px;margin:36px auto;padding:0 16px}
+    .wrap{max-width:1100px;margin:36px auto;padding:0 16px}
     h1{font-size:22px;margin:0 0 16px}
     .card{background:var(--card);border:1px solid #1e2a52;border-radius:14px;padding:16px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
     .row{display:grid;gap:12px}
-    @media(min-width:880px){.row{grid-template-columns:repeat(4,1fr)}}
+    @media(min-width:980px){.row{grid-template-columns:repeat(4,1fr)}}
     label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
     input,select,button{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #273459;background:#0f1630;color:var(--text)}
     button{cursor:pointer;background:linear-gradient(180deg,#1e2d66,#1a2660);border:1px solid #2b3e7a}
     button:hover{filter:brightness(1.05)}
-    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:16px}
-    @media(max-width:880px){.grid{grid-template-columns:1fr}}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:16px}
+    @media(max-width:980px){.grid{grid-template-columns:1fr}}
     .stat{background:#0f1630;border:1px solid #223064;border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:8px}
     .stat .label{color:var(--muted);font-size:12px;letter-spacing:.4px;text-transform:uppercase}
     .stat .value{font-size:28px;font-weight:700}
@@ -28,17 +28,20 @@
     .flex{display:flex;gap:10px;align-items:end}
     .list{margin-top:12px;border-top:1px solid #243366}
     .item{display:grid;grid-template-columns:140px 110px 1fr;gap:10px;padding:10px 0;border-bottom:1px dashed #223064;align-items:center}
-    .sev{display:inline-block;padding:4px 8px;border-radius:999px;font-size:12px}
-    .sev.warn{background:rgba(246,198,75,.15);border:1px solid #f6c64b;color:#f6c64b}
-    .sev.critical{background:rgba(255,95,95,.12);border:1px solid #ff5f5f;color:#ff5f5f}
-    .sev.ok{background:rgba(62,207,142,.12);border:1px solid #3ecf8e;color:#3ecf8e}
     .kv{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; color:#cfd5e6}
     .pill{display:inline-block;padding:2px 6px;border-radius:8px;border:1px solid #2a3a74;background:#0c1430;color:#9fb2ff;font-size:11px;margin-left:6px}
+    .devices{max-height:320px;overflow:auto;padding-top:8px}
+    .dev-item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px dashed #1f2b50}
+    .dev-left{display:flex;flex-direction:column}
+    .dev-id{font-weight:600}
+    .small{font-size:12px;color:var(--muted)}
+    .controls{display:flex;gap:8px;align-items:center}
+    .age{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color:#cfd5e6; font-size:12px}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>🚁 Drone Flight Stats & Alarms</h1>
+    <h1>🚁 Drone Flight Stats & Devices</h1>
     <div class="card">
       <div class="row">
         <div>
@@ -63,22 +66,29 @@
       </div>
 
       <div class="flex" style="margin-top:12px">
-        <button id="loadBtn">Load Stats</button>
-        <button id="resetBtn">Reset</button>
-        <span id="status" class="muted"></span>
+        <div class="controls">
+          <button id="loadBtn" type="button">Load Stats</button>
+          <button id="resetBtn" type="button">Reset</button>
+          <button id="refreshDevicesBtn" type="button" title="Refresh online devices">Refresh Devices</button>
+        </div>
+        <div style="margin-left:auto">
+          <span id="status" class="muted"></span>
+        </div>
       </div>
 
-      <div class="grid">
+      <div class="grid" style="margin-top:16px">
         <div class="stat">
           <div class="label">Total Flying</div>
           <div id="fhValue" class="value">—</div>
           <div id="fhMeta" class="muted">window: last 365 days</div>
         </div>
+
         <div class="stat">
           <div class="label">Landing Count</div>
           <div id="landValue" class="value">—</div>
           <div id="landMeta" class="muted">window: last 365 days</div>
         </div>
+
         <div class="stat">
           <div class="label">Crash / Hard-Landing</div>
           <div class="value">
@@ -87,23 +97,42 @@
           </div>
           <div id="crashMeta" class="muted">window: last 365 days</div>
         </div>
+
+        <div class="stat">
+          <div class="label">Online Devices</div>
+          <div class="value" id="onlineCount">—</div>
+          <div class="small" id="onlineMeta">last refresh: —</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-top:18px">
+        <div class="card" style="padding:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div style="font-weight:700">Recent Crash / Hard-Landing Events</div>
+            <div class="small">showing latest 25</div>
+          </div>
+          <div id="alarmList" class="list" style="margin-top:10px"></div>
+        </div>
+
+        <div class="card" style="padding:12px;">
+          <div style="font-weight:700;margin-bottom:8px">Online Devices</div>
+          <div id="devices" class="devices small">
+            <div class="muted">No data yet. Click 'Refresh Devices' or load stats.</div>
+          </div>
+        </div>
       </div>
 
       <div id="error" class="err" style="margin-top:12px"></div>
-
-      <div class="list" id="alarmList">
-        <!-- recent events render here -->
-      </div>
-
       <div class="footer">
-        Uses <code>/flight-hours</code>, <code>/landings</code>, <code>/crash-alarms</code>, and <code>/crash-alarms/count</code>.
+        Uses <code>/flight-hours</code>, <code>/landings</code>, <code>/crash-alarms</code>, <code>/crash-alarms/count</code> and <code>/online-devices</code>.
       </div>
     </div>
   </div>
 
   <script>
-    const $ = (id) => document.getElementById(id);
-    const base = ""; // same-origin; set like "/api" if you mount under a prefix
+    // helpers
+    const $ = id => document.getElementById(id);
+    const base = ""; // same-origin; change if your API sits under a prefix like "/api"
 
     function qs(params) {
       return Object.entries(params)
@@ -125,8 +154,7 @@
       return String(val);
     }
 
-    function sevClass(s){ return s === "critical" ? "critical" : (s === "warn" ? "warn" : "ok"); }
-
+    // render alarms
     function renderAlarms(items) {
       const el = $("alarmList");
       el.innerHTML = "";
@@ -134,30 +162,71 @@
         el.innerHTML = `<div class="item"><div class="muted">No crash/hard-landing events in window.</div></div>`;
         return;
       }
-      items.slice(0, 25).forEach(it => {
+      items.slice(0,25).forEach(it => {
         const time = it.time || "";
         const event = it.event || "alarm";
-        const sev = it.severity || "warn";
         const vdown = it.v_down != null ? `v↓ ${Number(it.v_down).toFixed(2)} m/s` : "";
-        const vh    = it.v_h_pre != null ? `vₕ ${Number(it.v_h_pre).toFixed(2)} m/s` : "";
-        const g     = it.g != null ? `${Number(it.g).toFixed(1)} g` : "";
-        const meta  = [vdown, vh, g].filter(Boolean).join("  ·  ");
-
+        const vh = it.v_h_pre != null ? `vₕ ${Number(it.v_h_pre).toFixed(2)} m/s` : "";
+        const g = it.g != null ? `${Number(it.g).toFixed(1)} g` : "";
+        const meta = [vdown, vh, g].filter(Boolean).join("  ·  ");
         const div = document.createElement("div");
         div.className = "item";
         div.innerHTML = `
           <div class="muted">${time}</div>
-          <div><span class="sev ${sevClass(sev)}">${event.replace("_"," ")}</span></div>
+          <div><span class="sev">${event.replace("_"," ")}</span></div>
           <div class="kv">${meta}</div>
         `;
         el.appendChild(div);
       });
     }
 
+    // devices: sort by last_seen desc and show age (s)
+    function ageSeconds(iso) {
+      if (!iso) return null;
+      const t = Date.parse(iso);
+      if (isNaN(t)) return null;
+      return Math.max(0, Math.floor((Date.now() - t) / 1000));
+    }
+
+    function renderDevices(items) {
+      const el = $("devices");
+      el.innerHTML = "";
+      if (!items || !items.length) {
+        el.innerHTML = `<div class="muted">No online devices.</div>`;
+        $("onlineCount").textContent = "0";
+        $("onlineMeta").textContent = `last refresh: ${new Date().toLocaleTimeString()}`;
+        return;
+      }
+
+      // sort newest first (missing last_seen => push to end)
+      items.sort((a,b) => {
+        const ta = a.last_seen ? Date.parse(a.last_seen) : 0;
+        const tb = b.last_seen ? Date.parse(b.last_seen) : 0;
+        return (tb - ta);
+      });
+
+      items.forEach(it => {
+        const div = document.createElement("div");
+        div.className = "dev-item";
+        const left = document.createElement("div");
+        left.innerHTML = `<div class="dev-id">${it.drone_id}</div>
+                          <div class="small">last_seen: ${it.last_seen || "—"}</div>`;
+        const age = ageSeconds(it.last_seen);
+        const right = document.createElement("div");
+        right.innerHTML = `<div class="age">${age !== null ? age + " s" : "—"}</div>`;
+        div.appendChild(left);
+        div.appendChild(right);
+        el.appendChild(div);
+      });
+
+      $("onlineCount").textContent = String(items.length);
+      $("onlineMeta").textContent = `last refresh: ${new Date().toLocaleTimeString()}`;
+    }
+
+    // data loaders
     async function loadStats() {
       $("error").textContent = "";
       $("status").textContent = "Loading…";
-
       const droneId = $("droneId").value.trim();
       const unit = $("unit").value;
       const start = $("start").value.trim();
@@ -170,29 +239,22 @@
       }
 
       const qBase = { start, end };
-      const fhURL = `${base}/flight-hours?${qs({ ...qBase, drone_id: droneId, unit })}`;
-      const ldURL = `${base}/landings?${qs({ ...qBase, drone_id: droneId })}`;
-      const caCntURL = `${base}/crash-alarms/count?${qs({ ...qBase, drone_id: droneId })}`;
-      const caListURL = `${base}/crash-alarms?${qs({ ...qBase, drone_id: droneId })}`;
+      const fhURL = `${base}/flight-hours?${qs({...qBase, drone_id: droneId, unit})}`;
+      const ldURL = `${base}/landings?${qs({...qBase, drone_id: droneId})}`;
+      const caCntURL = `${base}/crash-alarms/count?${qs({...qBase, drone_id: droneId})}`;
+      const caListURL = `${base}/crash-alarms?${qs({...qBase, drone_id: droneId})}`;
 
       try {
         const [fh, ld, caCnt, caList] = await Promise.all([
-          fetchJSON(fhURL),
-          fetchJSON(ldURL),
-          fetchJSON(caCntURL),
-          fetchJSON(caListURL),
+          fetchJSON(fhURL), fetchJSON(ldURL), fetchJSON(caCntURL), fetchJSON(caListURL)
         ]);
-
         $("fhValue").textContent = fmt(fh.value, unit);
         $("fhMeta").textContent = `window: ${fh.start} → ${fh.end}`;
-
         $("landValue").textContent = (ld.landings ?? "—");
         $("landMeta").textContent = `window: ${ld.start} → ${ld.end}`;
-
         $("crashCount").textContent = (caCnt.count ?? "—");
         $("crashMeta").textContent = `window: ${caList.start || fh.start} → ${caList.end || fh.end}`;
         renderAlarms(caList.items);
-
         $("status").textContent = "Updated";
       } catch (e) {
         $("error").textContent = `Failed to load stats: ${e.message}`;
@@ -200,16 +262,41 @@
       }
     }
 
-    $("loadBtn").addEventListener("click", loadStats);
-    $("resetBtn").addEventListener("click", () => {
-      ["droneId","start","end"].forEach(id => $(id).value = "");
-      ["fhValue","landValue","crashCount"].forEach(id => $(id).textContent = "—");
-      $("fhMeta").textContent = "window: last 365 days";
-      $("landMeta").textContent = "window: last 365 days";
-      $("crashMeta").textContent = "window: last 365 days";
-      $("alarmList").innerHTML = "";
-      $("status").textContent = "";
-      $("error").textContent = "";
+    async function loadDevices() {
+      try {
+        const url = `${base}/online-devices`;
+        const res = await fetchJSON(url);
+        const items = res.devices || [];
+        renderDevices(items);
+      } catch (e) {
+        $("devices").innerHTML = `<div class="muted">Failed to load devices: ${e.message}</div>`;
+        console.error("loadDevices error", e);
+      }
+    }
+
+    // attach listeners after DOM ready
+    document.addEventListener("DOMContentLoaded", () => {
+      // wire buttons
+      $("loadBtn").addEventListener("click", loadStats);
+      $("resetBtn").addEventListener("click", () => {
+        ["droneId","start","end"].forEach(id => $(id).value = "");
+        ["fhValue","landValue","crashCount","onlineCount"].forEach(id => $(id).textContent = "—");
+        ["fhMeta","landMeta","crashMeta","onlineMeta"].forEach(id => $(id).textContent = "window: last 365 days");
+        $("alarmList").innerHTML = "";
+        $("devices").innerHTML = `<div class="muted">No data yet. Click 'Refresh Devices' or load stats.</div>`;
+        $("status").textContent = "";
+        $("error").textContent = "";
+      });
+      $("refreshDevicesBtn").addEventListener("click", loadDevices);
+
+      // auto-refresh
+      let devicesInterval = null;
+      function startAuto() {
+        if (devicesInterval) clearInterval(devicesInterval);
+        loadDevices();
+        devicesInterval = setInterval(loadDevices, 20*1000);
+      }
+      startAuto();
     });
   </script>
 </body>
