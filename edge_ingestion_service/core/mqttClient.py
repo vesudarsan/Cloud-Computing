@@ -148,6 +148,7 @@ class MQTTClient:
         return None
 
     def connect(self, topic, lwt_message, qos=1, retain=True):
+        print("self.sp_device_id:",self.sp_device_id)
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message
@@ -161,6 +162,7 @@ class MQTTClient:
             "status": "disconnect",
             "start_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         })
+        
         topic = f"{self.sparkplug_namespace}/{self.sp_group_id}/NDEATH/{self.sp_device_id}"
         self.client.publish(topic, payload=disconnect_msg, qos=1, retain=False)
         try:

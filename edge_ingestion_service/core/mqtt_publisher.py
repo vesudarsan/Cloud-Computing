@@ -48,7 +48,7 @@ class MQTTPublisher:
         while True:
             try:
                 logging.info(f"Attempting to connect to MQTT broker ({self.broker}:{self.port})... [Attempt {attempt + 1}]")
-                self.client.connect(f"{self.sparkplug_namespace}/{self.sp_group_id}/NDEATH/{self.sp_edge_id}", 
+                self.client.connect(f"{self.sparkplug_namespace}/{self.sp_group_id}/NDEATH/{self.sp_device_id}", 
                                     lwt_message, 1, True)
                 logging.info("MQTT connected successfully.")
                 self.mqtt_connected = True
