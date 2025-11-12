@@ -161,8 +161,8 @@ class MQTTClient:
             "status": "disconnect",
             "start_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         })
-        topic = f"{self.sparkplug_namespace}/{self.sp_group_id}/NDEATH/{self.sp_edge_id}"
-        self.client.publish(topic, payload=disconnect_msg, qos=1, retain=True)
+        topic = f"{self.sparkplug_namespace}/{self.sp_group_id}/NDEATH/{self.sp_device_id}"
+        self.client.publish(topic, payload=disconnect_msg, qos=1, retain=False)
         try:
             self.client.loop_stop()
             self.client.disconnect()
