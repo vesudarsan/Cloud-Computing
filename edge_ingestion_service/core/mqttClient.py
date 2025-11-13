@@ -14,8 +14,10 @@ from collections import defaultdict,deque
 logging = setup_logger(__name__)
 
 # ---- Tunables via env (sane defaults) ----
-ALT_START = float(os.getenv("FS_ALT_START", "1.5"))     # m  -> start if >=
-ALT_END   = float(os.getenv("FS_ALT_END",   "0.8"))     # m  -> end when <=
+# ALT_START = float(os.getenv("FS_ALT_START", "1.5"))     # m  -> start if >=
+# ALT_END   = float(os.getenv("FS_ALT_END",   "0.8"))     # m  -> end when <=
+ALT_START = float(os.getenv("FS_ALT_START", "2.0"))     # m  -> start if >=
+ALT_END   = float(os.getenv("FS_ALT_END",   "1.4"))     # m  -> end when <=
 SPD_START = float(os.getenv("FS_SPD_START", "0.8"))     # m/s
 SPD_END   = float(os.getenv("FS_SPD_END",   "0.3"))     # m/s
 START_HOLD = int(os.getenv("FS_START_HOLD", "3"))       # samples to confirm takeoff
