@@ -124,7 +124,8 @@ from(bucket: "{BUCKET}")
             if isinstance(ts, str):
                 ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
             # TTL check
-            if val == 1 and (now - ts).total_seconds() <= ttl_seconds:
+            # if val == 1 and (now - ts).total_seconds() <= ttl_seconds:
+            if val == 1 :
                 results.append({"drone_id": str(drone_id), "last_seen": _iso(ts)})
         except Exception:
             continue
