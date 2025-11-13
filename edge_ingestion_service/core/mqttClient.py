@@ -424,9 +424,10 @@ class MQTTClient:
         below_end   = (alt_m <= ALT_END)   and (spd_ms <= SPD_END)
 
         # st["last_ts"] = ts
-
+        print("drone_id:",drone_id," alt_m:",alt_m," spd_ms:",spd_ms," above_start:",above_start," below_end:",below_end)
         # TAKEOFF detection (debounced)
         if not st["in_air"]:
+            print("Takeoff detection check")
             if above_start:
                 st["hold_start"] += 1
                 if st["hold_start"] >= START_HOLD:
@@ -441,6 +442,7 @@ class MQTTClient:
 
         # LANDING detection (debounced)
         if st["in_air"]:
+            print("Landing detection check")
             if below_end:
                 st["hold_end"] += 1
                 if st["hold_end"] >= END_HOLD:
