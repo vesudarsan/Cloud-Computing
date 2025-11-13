@@ -21,7 +21,7 @@ SPD_END   = float(os.getenv("FS_SPD_END",   "0.3"))     # m/s
 START_HOLD = int(os.getenv("FS_START_HOLD", "3"))       # samples to confirm takeoff
 END_HOLD   = int(os.getenv("FS_END_HOLD",   "3"))       # samples to confirm landing
 MIN_FLIGHT_SEC = int(os.getenv("FS_MIN_FLIGHT_SEC", "5"))
-PAD_SEC        = int(os.getenv("FS_PAD_SEC", "2"))      # pad window on both ends
+PAD_SEC        = int(os.getenv("FS_PAD_SEC", "1"))      # pad window on both ends
 MAX_CLOCK_SKEW_SEC = 5
 
 def _iso(dt: datetime) -> str:
@@ -423,7 +423,7 @@ class MQTTClient:
         above_start = (alt_m >= ALT_START) or (spd_ms >= SPD_START)
         below_end   = (alt_m <= ALT_END)   and (spd_ms <= SPD_END)
 
-        st["last_ts"] = ts
+        # st["last_ts"] = ts
 
         # TAKEOFF detection (debounced)
         if not st["in_air"]:

@@ -1,0 +1,24 @@
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# SQLite DB
+buffer.db
+deployments.db
+
+# Virtual environment
+venv/
+.env/
+
+# Logs
+*.log
+
+# Docker
+*.pid
+*.sock
+
+# OS-specific
+.DS_Store
+Thumbs.db
