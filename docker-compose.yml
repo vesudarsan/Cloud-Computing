@@ -4,7 +4,7 @@ services:
 
   edge_ingestion_service:
     build: ./edge_ingestion_service
-    image: 1111vesudarsan/edge_ingestion_service:1.0.0
+    image: vesudarsan/edge_ingestion_service:1.0.0
     container_name: edge_ingestion_service
       
     ports:
