@@ -26,6 +26,8 @@ try:
         SP_GROUP_ID = config["sparkplug_group_id"]
         SP_EDGE_ID = config["drone_UID"]
         SP_DEVICE_ID = config["sparkplug_device_id"]
+        USERNAME = config["mqtt_username"]
+        PASSWORD = config["mqtt_password"]
 
         logging.info(f" [✅] Loaded  config values from file")
 
@@ -39,6 +41,8 @@ except FileNotFoundError:
     SP_GROUP_ID = "DroneFleet"
     SP_EDGE_ID = "DHAKSHA-001"        # e.g., DRONE-001
     SP_DEVICE_ID = ""            # Optional
+    USERNAME = ""
+    PASSWORD = ""
 
 
 
@@ -47,7 +51,7 @@ except FileNotFoundError:
 # Instantiate Publisher
 # ------------------------
 publisher = MQTTPublisher(MQTT_BROKER,MQTT_PORT,DRONE_UID,SPARKPLUG_NAMESPACE,
-                                SP_GROUP_ID,SP_EDGE_ID,SP_DEVICE_ID)
+                                SP_GROUP_ID,SP_EDGE_ID,SP_DEVICE_ID,USERNAME,PASSWORD)
 
 # Register REST API routes
 register_routes(app, publisher)

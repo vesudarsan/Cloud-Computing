@@ -1,4 +1,5 @@
 import paho.mqtt.client as mqtt
+import ssl
 import json
 import time
 import psutil
@@ -41,8 +42,8 @@ else:
 
 class MQTTClient:
     def __init__(self, broker, port, drone_id, sparkplug_namespace,
-                 sp_group_id, sp_edge_id, sp_device_id):
-        self.client = mqtt.Client(client_id=str(sp_device_id), clean_session=True)
+                 sp_group_id, sp_edge_id, sp_device_id, username, password):
+        self.client = mqtt.Client(client_id=str(sp_device_id), clean_session=True,protocol=mqtt.MQTTv311)
         self.broker = broker
         self.port = port
         self.connected = False
@@ -62,6 +63,15 @@ class MQTTClient:
             bucket=INFLUX_BUCKET
         )
 
+        # 🔐 TLS CONFIG (NO cert files needed for HiveMQ Cloud)
+        self.client.tls_set(
+            tls_version=ssl.PROTOCOL_TLS_CLIENT
+        )
+        self.client.tls_insecure_set(False)
+
+        # 🔑 Authentication
+        self.client.username_pw_set(username, password)
+
         # ---- Multi-drone flight & clock state ----
         self._fs = {}            # {droneId: {...}}
         self._clk = {}           # {droneId: {"unix": dt, "boot_ms": int}}
@@ -74,6 +84,10 @@ class MQTTClient:
         self._imu = {}  # {drone_id: last accel magnitude, g}
         self._buf_len_sec = float(os.getenv("CRASH_BUF_SEC", "3.0"))
         self.online_devices = {}   # drone_id -> {"last_seen": iso, "payload": {...}}
+
+
+
+
 
     ## Code for buffering and impact detection , used to detect impacts like crashes and hard landings
     def _buf_get(self, drone_id):

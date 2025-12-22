@@ -4,7 +4,7 @@ services:
 
   edge_ingestion_service:
     build: ./edge_ingestion_service
-    image: vesudarsan/edge_ingestion_service:1.0.0
+    image: 1111vesudarsan/edge_ingestion_service:1.0.0
     container_name: edge_ingestion_service
       
     ports:
@@ -13,6 +13,8 @@ services:
     volumes:
      - D:/cloudCompute/config.json:/app/config/config.json:ro
      - D:/cloudCompute:/app/data
+    #  - INFLUX_TOKEN=${INFLUX_TOKEN}
+    #  - INFLUX_ORG=${INFLUX_ORG}
     
     environment:
       - PYTHONUNBUFFERED=1
@@ -41,21 +43,21 @@ services:
 #   rabbitmq-data:
 
 
-#   influxdb:
-#     image: influxdb:2.7
-#     container_name: influxdb
-#     ports:
-#       - "8086:8086"
-#     volumes:
-#       - influxdb-data:/var/lib/influxdb2
-#     environment:
-#       - DOCKER_INFLUXDB_INIT_MODE=setup
-#       - DOCKER_INFLUXDB_INIT_USERNAME=admin
-#       - DOCKER_INFLUXDB_INIT_PASSWORD=admin123
-#       - DOCKER_INFLUXDB_INIT_ORG=drone-org
-#       - DOCKER_INFLUXDB_INIT_BUCKET=drone_telemetry
-#       - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=drone-secret-token
-#     restart: unless-stopped
+  # influxdb:
+  #   image: influxdb:2.7
+  #   container_name: influxdb
+  #   ports:
+  #     - "8086:8086"
+  #   volumes:
+  #     - influxdb-data:/var/lib/influxdb2
+  #   environment:
+  #     - DOCKER_INFLUXDB_INIT_MODE=setup
+  #     - DOCKER_INFLUXDB_INIT_USERNAME=admin
+  #     - DOCKER_INFLUXDB_INIT_PASSWORD=admin123
+  #     - DOCKER_INFLUXDB_INIT_ORG=drone-org
+  #     - DOCKER_INFLUXDB_INIT_BUCKET=drone_telemetry
+  #     - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=drone-secret-token
+  #   restart: unless-stopped
 
 # volumes:
 #   influxdb-data:
