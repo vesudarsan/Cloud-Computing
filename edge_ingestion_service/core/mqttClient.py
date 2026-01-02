@@ -314,8 +314,11 @@ class MQTTClient:
                 # Decode the Base64 back to binary
                 binary_data = base64.b64decode(payload["bin_file_base64"])
 
+                host_dir = "/app/data"   # inside container, mapped to D:/cloudCompute on host
+                file_path = os.path.join(host_dir, payload["filename"])
+
                 # Write to a file (using the original filename)
-                with open(payload["filename"], "wb") as f:
+                with open(file_path, "wb") as f:
                     f.write(binary_data)
                 logging.info(f"Binary file '{payload['filename']}' written successfully.")
 
