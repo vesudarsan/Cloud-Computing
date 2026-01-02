@@ -4,6 +4,7 @@ import json
 import time
 import psutil
 import socket
+import base64
 import platform
 from utils.logger import setup_logger
 from utils.influx_writer import InfluxWriter
@@ -203,6 +204,7 @@ class MQTTClient:
             # f"{self.sparkplug_namespace}/{self.sp_group_id}/DDATA/{self.sp_edge_id}/Mavlink"
             f"{self.sparkplug_namespace}/{self.sp_group_id}/NBIRTH/+",
             f"{self.sparkplug_namespace}/{self.sp_group_id}/NDEATH/+",
+            f"{self.sparkplug_namespace}/{self.sp_group_id}/DDATA/+/binFile",
             f"{self.sparkplug_namespace}/{self.sp_group_id}/DDATA/+/Mavlink"
         ]
         for t in topics:
@@ -304,6 +306,19 @@ class MQTTClient:
                 if message_type == "GLOBAL_POSITION_INT":
                     self.update_drone_location(droneId, payload)
                     self._on_gpos_for_flight_state(droneId, payload)
+
+            elif "binFile" in topic:
+                
+                payload = json.loads(msg.payload.decode())
+
+                # Decode the Base64 back to binary
+                binary_data = base64.b64decode(payload["bin_file_base64"])
+
+                # Write to a file (using the original filename)
+                with open(payload["filename"], "wb") as f:
+                    f.write(binary_data)
+                logging.info(f"Binary file '{payload['filename']}' written successfully.")
+
 
         except json.JSONDecodeError as e:
             logging.error(f"Invalid JSON in payload: {e}")
